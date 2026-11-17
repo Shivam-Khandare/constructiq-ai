@@ -1,0 +1,202 @@
+{
+  "sites": [
+    {
+      "id": "site-1",
+      "name": "Site 1",
+      "location": "Zone 1",
+      "supervisor": "Site In-Charge 1",
+      "telegram_chat_id": "",
+      "telegram_tag": "site1",
+      "created_at": "2026-11-12T17:59:25.910325+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    },
+    {
+      "id": "site-2",
+      "name": "Site 2",
+      "location": "Zone 2",
+      "supervisor": "Site In-Charge 2",
+      "telegram_chat_id": "",
+      "telegram_tag": "site2",
+      "created_at": "2026-11-12T17:59:25.914127+00:00",
+      "status": "active",
+      "overall_risk": "low",
+      "ppe_compliance": "compliant",
+      "photo_count": 1,
+      "latest_photo": {
+        "id": "photo-b2714925",
+        "site_id": "site-2",
+        "filename": "site-2_0a97874eb0.jpg",
+        "url": "/api/sites/site-2/images/site-2_0a97874eb0.jpg",
+        "timestamp": "2026-11-13T04:19:36.482907+00:00",
+        "sender": "📱 Telegram: Shivam Khandare",
+        "caption": "Photo sent from phone via Telegram",
+        "safety_analysis": {
+          "overall_risk_level": "low",
+          "what_is_the_risk": "No major safety hazards detected. Workers are using proper precautions and the work area is clean.",
+          "how_to_improve": "Keep walking paths clear of tripping hazards and continue wearing safety gear.",
+          "ppe_compliance": "compliant",
+          "summary": "Work area is in safe and compliant condition.",
+          "hazards": [],
+          "immediate_actions": [
+            "Continue standard daily precautions"
+          ]
+        }
+      }
+    },
+    {
+      "id": "site-3",
+      "name": "Site 3",
+      "location": "Zone 3",
+      "supervisor": "Site In-Charge 3",
+      "telegram_chat_id": "",
+      "telegram_tag": "site3",
+      "created_at": "2026-11-12T17:59:25.914370+00:00",
+      "status": "active",
+      "overall_risk": "low",
+      "ppe_compliance": "compliant",
+      "photo_count": 1,
+      "latest_photo": {
+        "id": "photo-cbdf8598",
+        "site_id": "site-3",
+        "filename": "site-3_399a4fb09d.jpg",
+        "url": "/api/sites/site-3/images/site-3_399a4fb09d.jpg",
+        "timestamp": "2026-11-13T04:17:49.620260+00:00",
+        "sender": "📱 Telegram: Shivam Khandare",
+        "caption": "Photo sent from phone via Telegram",
+        "safety_analysis": {
+          "overall_risk_level": "low",
+          "what_is_the_risk": "No major safety hazards detected. Workers are using proper precautions and the work area is clean.",
+          "how_to_improve": "Keep walking paths clear of tripping hazards and continue wearing safety gear.",
+          "ppe_compliance": "compliant",
+          "summary": "Work area is in safe and compliant condition.",
+          "hazards": [],
+          "immediate_actions": [
+            "Continue standard daily precautions"
+          ]
+        }
+      }
+    },
+    {
+      "id": "site-4",
+      "name": "Site 4",
+      "location": "Zone 4",
+      "supervisor": "Site In-Charge 4",
+      "telegram_chat_id": "-1004499112172",
+      "telegram_tag": "site4",
+      "created_at": "2026-11-12T17:59:25.921160+00:00",
+      "status": "active",
+      "overall_risk": "low",
+      "ppe_compliance": "compliant",
+      "photo_count": 1,
+      "latest_photo": {
+        "id": "photo-6d9ec487",
+        "site_id": "site-4",
+        "filename": "site-4_756d4c9c47.jpg",
+        "url": "/api/sites/site-4/images/site-4_756d4c9c47.jpg",
+        "timestamp": "2026-11-17T13:30:54.123322+00:00",
+        "sender": "📱 Telegram: Shivam Khandare",
+        "caption": "Photo sent from phone via Telegram",
+        "safety_analysis": {
+          "overall_risk_level": "low",
+          "what_is_the_risk": "No major safety hazards detected. Workers are using proper precautions and the work area is clean.",
+          "how_to_improve": "Keep walking paths clear of tripping hazards and continue wearing safety gear.",
+          "ppe_compliance": "compliant",
+          "summary": "Work area is in safe and compliant condition.",
+          "hazards": [],
+          "immediate_actions": [
+            "Continue standard daily precautions"
+          ]
+        }
+      }
+    },
+    {
+      "id": "site-5",
+      "name": "Site 5",
+      "location": "Zone 5",
+      "supervisor": "Site In-Charge 5",
+      "telegram_chat_id": "",
+      "telegram_tag": "site5",
+      "created_at": "2026-11-12T17:59:25.921805+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    },
+    {
+      "id": "site-6",
+      "name": "Site 6",
+      "location": "Zone 6",
+      "supervisor": "Site In-Charge 6",
+      "telegram_chat_id": "",
+      "telegram_tag": "site6",
+      "created_at": "2026-11-12T17:59:25.922487+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    },
+    {
+      "id": "site-7",
+      "name": "Site 7",
+      "location": "Zone 7",
+      "supervisor": "Site In-Charge 7",
+      "telegram_chat_id": "",
+      "telegram_tag": "site7",
+      "created_at": "2026-11-12T17:59:25.924708+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    },
+    {
+      "id": "site-8",
+      "name": "Site 8",
+      "location": "Zone 8",
+      "supervisor": "Site In-Charge 8",
+      "telegram_chat_id": "",
+      "telegram_tag": "site8",
+      "created_at": "2026-11-12T17:59:25.925225+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    },
+    {
+      "id": "site-9",
+      "name": "Site 9",
+      "location": "Zone 9",
+      "supervisor": "Site In-Charge 9",
+      "telegram_chat_id": "",
+      "telegram_tag": "site9",
+      "created_at": "2026-11-12T17:59:25.925759+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    },
+    {
+      "id": "site-10",
+      "name": "Site 10",
+      "location": "Zone 10",
+      "supervisor": "Site In-Charge 10",
+      "telegram_chat_id": "",
+      "telegram_tag": "site10",
+      "created_at": "2026-11-12T17:59:25.926091+00:00",
+      "status": "active",
+      "overall_risk": "none",
+      "ppe_compliance": "pending",
+      "photo_count": 0,
+      "latest_photo": null
+    }
+  ],
+  "last_updated": "2026-11-17T13:30:54.127973+00:00"
+}

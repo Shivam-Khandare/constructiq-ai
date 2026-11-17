@@ -1,0 +1,22 @@
+[
+  {
+    "id": "photo-b2714925",
+    "site_id": "site-2",
+    "filename": "site-2_0a97874eb0.jpg",
+    "url": "/api/sites/site-2/images/site-2_0a97874eb0.jpg",
+    "timestamp": "2026-11-13T04:19:36.482907+00:00",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Photo sent from phone via Telegram",
+    "safety_analysis": {
+      "overall_risk_level": "low",
+      "what_is_the_risk": "No major safety hazards detected. Workers are using proper precautions and the work area is clean.",
+      "how_to_improve": "Keep walking paths clear of tripping hazards and continue wearing safety gear.",
+      "ppe_compliance": "compliant",
+      "summary": "Work area is in safe and compliant condition.",
+      "hazards": [],
+      "immediate_actions": [
+        "Continue standard daily precautions"
+      ]
+    }
+  }
+]

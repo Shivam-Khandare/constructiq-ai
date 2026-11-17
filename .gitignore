@@ -1,0 +1,31 @@
+# OS
+.DS_Store
+Thumbs.db
+*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node / Frontend
+node_modules/
+dist/
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.production
+
+# Backend data (photos, runtime state)
+backend/data/uploads/
+backend/data/telegram_config.json
