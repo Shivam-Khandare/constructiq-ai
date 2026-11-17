@@ -529,6 +529,17 @@ class TelegramService:
         if m:
             return int(m.group(1))
 
+        # Check against custom site names (e.g. renamed to 'Metro Rail' or tapped '📍 Metro Rail')
+        clean_text = t.replace("📍", "").strip().lower()
+        if clean_text:
+            for s in get_all_sites():
+                s_name = s.get("name", "").strip().lower()
+                if s_name and (clean_text == s_name or clean_text == s.get("id", "").lower()):
+                    try:
+                        return int(s["id"].replace("site-", ""))
+                    except ValueError:
+                        pass
+
         return None
 
     # ── Command & Menu Handlers ──────────────────────────────────────────────
@@ -709,9 +720,15 @@ class TelegramService:
         await self.send_message(chat_id, reply, reply_to_message_id=reply_msg_id, reply_markup=reply_kb)
 
         # 4. Check if there was a pending photo waiting to be processed!
-        chat_key = str(chat_id)
-        if chat_key in self.pending_photos:
-            pending = self.pending_photos.pop(chat_key)
+        chat_str = str(chat_id)
+        pending_key = None
+        for k in list(self.pending_photos.keys()):
+            if _all_tg_variants(k) & _all_tg_variants(chat_str):
+                pending_key = k
+                break
+
+        if pending_key:
+            pending = self.pending_photos.pop(pending_key)
             logger.info("Processing pending photo for newly bound %s", target_site_id)
             await self._process_and_save_photo(
                 target_site_id=target_site_id,

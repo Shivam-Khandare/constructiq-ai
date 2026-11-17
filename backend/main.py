@@ -836,12 +836,13 @@ def serve_site_image(site_id: str, filename: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found.")
 
+    fn_lower = filename.lower()
     media_type = "image/jpeg"
-    if filename.endswith(".png"):
+    if fn_lower.endswith(".png"):
         media_type = "image/png"
-    elif filename.endswith(".webp"):
+    elif fn_lower.endswith(".webp"):
         media_type = "image/webp"
-    elif filename.endswith(".svg"):
+    elif fn_lower.endswith(".svg"):
         media_type = "image/svg+xml"
     return FileResponse(file_path, media_type=media_type)
 

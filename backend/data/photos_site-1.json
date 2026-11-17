@@ -1,1 +1,195 @@
-[]
+[
+  {
+    "id": "photo-ec151c4c",
+    "site_id": "site-1",
+    "filename": "site-1_c940ca504d.jpg",
+    "url": "/api/sites/site-1/images/site-1_c940ca504d.jpg",
+    "timestamp": "2026-11-17T16:11:50.530426+00:00",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Photo sent from phone via Telegram",
+    "safety_analysis": {
+      "overall_risk_level": "critical",
+      "what_is_the_risk": "The workers are operating at a significant height on a scaffold platform that lacks essential fall protection, specifically guardrails (top rail, mid-rail) and toe-boards. There is no evidence of personal fall arrest systems (harnesses and lanyards) being used, creating an imminent risk of a fatal fall.",
+      "how_to_improve": "Immediately install standard guardrail systems on all open sides of the scaffold platforms. Ensure all workers at this elevation are equipped with and properly tied off to a certified fall arrest system. Conduct a safety briefing on working at heights.",
+      "ppe_compliance": "partial",
+      "hazards": [
+        {
+          "type": "Fall Risk",
+          "severity": "critical",
+          "location": "Upper and lower scaffold platforms",
+          "description": "Workers are working at height without guardrails or personal fall arrest systems.",
+          "recommendation": "Install guardrails and require the use of full-body harnesses with shock-absorbing lanyards anchored to a secure point."
+        },
+        {
+          "type": "PPE Violation",
+          "severity": "medium",
+          "location": "Scaffold platforms",
+          "description": "While hard hats and vests are present, the lack of fall protection equipment (harnesses) is a major safety violation.",
+          "recommendation": "Mandate the use of fall protection equipment for all work performed above 1.8 meters."
+        }
+      ],
+      "immediate_actions": [
+        "Stop all work on the scaffold platforms immediately.",
+        "Install compliant guardrails (top rail, mid-rail, and toe-board) on all open edges.",
+        "Provide and ensure the use of full-body harnesses and appropriate anchor points for all personnel at height."
+      ],
+      "summary": "The site presents a critical fall hazard due to the absence of guardrails and fall arrest systems on elevated scaffolding. Immediate work stoppage and the installation of fall protection are required to prevent a potential fatality."
+    }
+  },
+  {
+    "id": "photo-f638853d",
+    "site_id": "site-1",
+    "filename": "site-1_56ab69444b.jpg",
+    "url": "/api/sites/site-1/images/site-1_56ab69444b.jpg",
+    "timestamp": "2026-11-17T16:11:50.978138+00:00",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Photo sent from phone via Telegram",
+    "safety_analysis": {
+      "overall_risk_level": "critical",
+      "what_is_the_risk": "The workers are operating at a significant height on a scaffold platform that lacks essential fall protection, specifically guardrails (top rail, mid-rail) and toe-boards. There is no evidence of personal fall arrest systems (harnesses and lanyards) being used, creating an imminent risk of a fatal fall.",
+      "how_to_improve": "Immediately stop all work at height. Install standard guardrail systems (top rail at 42 inches, mid-rail at 21 inches) and toe-boards on all open sides of the scaffolding. Ensure all workers are equipped with and properly tied off to a certified anchor point using a full-body harness and shock-absorbing lanyard.",
+      "ppe_compliance": "partial",
+      "hazards": [
+        {
+          "type": "Fall Risk",
+          "severity": "critical",
+          "location": "Upper and lower scaffold platforms",
+          "description": "Workers are working at height without guardrails or personal fall arrest systems.",
+          "recommendation": "Install guardrails and require 100% tie-off with fall arrest equipment."
+        },
+        {
+          "type": "PPE Violation",
+          "severity": "medium",
+          "location": "Scaffold platforms",
+          "description": "While hard hats and vests are present, there is no visible fall protection equipment (harnesses) being worn by the workers at height.",
+          "recommendation": "Mandate the use of full-body harnesses for all work performed on scaffolding."
+        },
+        {
+          "type": "Housekeeping",
+          "severity": "medium",
+          "location": "Scaffold platforms",
+          "description": "The scaffold platforms appear to be narrow and lack toe-boards, which increases the risk of tools or materials falling and striking workers below.",
+          "recommendation": "Install toe-boards on all platform edges and maintain a clean, organized work surface."
+        }
+      ],
+      "immediate_actions": [
+        "Cease all work on the scaffolding immediately.",
+        "Install compliant guardrails and toe-boards on all open sides of the scaffold platforms.",
+        "Verify that all workers are trained in fall protection and are wearing appropriate fall arrest harnesses."
+      ],
+      "summary": "The site presents a critical fall hazard due to the absence of guardrails and personal fall arrest systems on elevated scaffolding. Immediate intervention is required to prevent a potential fatality."
+    }
+  },
+  {
+    "id": "photo-ff9d0693",
+    "site_id": "site-1",
+    "filename": "site-1_cfbd27172c.jpg",
+    "url": "/api/sites/site-1/images/site-1_cfbd27172c.jpg",
+    "timestamp": "2026-11-17T16:59:45.298730+00:00",
+    "sender": "Auditor",
+    "caption": "Scaffold inspection",
+    "safety_analysis": {
+      "overall_risk_level": "high",
+      "what_is_the_risk": "The scaffolding structure is incomplete and lacks critical fall protection. There are no guardrails (top rails or mid-rails) on the working platform, and the platform itself appears to be constructed from loose, potentially unstable wooden planks without proper securing or toe-boards.",
+      "how_to_improve": "Immediately install a complete guardrail system (top rail, mid-rail, and toe-board) around the perimeter of the scaffold platform. Ensure all wooden planks are of scaffold-grade quality, are fully decked, and are securely fastened to the scaffold frame to prevent shifting or tipping.",
+      "ppe_compliance": "not-visible",
+      "hazards": [
+        {
+          "type": "Fall Risk",
+          "severity": "high",
+          "location": "Scaffold working platform",
+          "description": "The scaffold platform lacks guardrails, creating a significant risk of falls from height.",
+          "recommendation": "Install standard guardrails (top rail at 1.1m, mid-rail at 0.5m) and toe-boards immediately."
+        },
+        {
+          "type": "Housekeeping",
+          "severity": "medium",
+          "location": "Scaffold platform",
+          "description": "The platform surface is uneven and consists of loose, overlapping wooden planks that pose a tripping hazard.",
+          "recommendation": "Replace loose planks with properly secured, scaffold-grade decking that covers the entire working surface."
+        }
+      ],
+      "immediate_actions": [
+        "Tag the scaffold as 'Do Not Use' until guardrails and proper decking are installed.",
+        "Restrict access to the scaffold platform for all personnel."
+      ],
+      "summary": "The scaffold is currently unsafe for use due to the absence of guardrails and improper decking. It presents a high risk of falls and must be remediated before any work can proceed."
+    }
+  },
+  {
+    "id": "photo-e540e57f",
+    "site_id": "site-1",
+    "filename": "site-1_62b76e1325.jpg",
+    "url": "/api/sites/site-1/images/site-1_62b76e1325.jpg",
+    "timestamp": "2026-11-17T16:59:45.323392+00:00",
+    "sender": "📱 Telegram: Ali",
+    "caption": "Rebar tied",
+    "safety_analysis": {
+      "overall_risk_level": "low",
+      "what_is_the_risk": "No major hazards detected. The work area appears clean and properly organized.",
+      "how_to_improve": "Continue keeping walkways clear of loose materials and wear safety gear at all times.",
+      "ppe_compliance": "compliant",
+      "summary": "Work area is safe and in good condition."
+    }
+  },
+  {
+    "id": "photo-77803dae",
+    "site_id": "site-1",
+    "filename": "site-1_dfaff970ac.jpg",
+    "url": "/api/sites/site-1/images/site-1_dfaff970ac.jpg",
+    "timestamp": "2026-11-17T18:04:40.691804+00:00",
+    "sender": "Auditor",
+    "caption": "Scaffold inspection",
+    "safety_analysis": {
+      "overall_risk_level": "high",
+      "what_is_the_risk": "The scaffolding structure is incomplete and lacks critical fall protection. Specifically, there is a significant gap between the working platform and the building facade, and the guardrail system (mid-rail and top-rail) is missing or inadequate, creating a high risk of falls from height.",
+      "how_to_improve": "Immediately install a complete guardrail system including top rails, mid-rails, and toe-boards. Close the gap between the scaffold platform and the building wall to prevent falls and dropped objects. Ensure all scaffold planks are secured and fully decked.",
+      "ppe_compliance": "non-compliant",
+      "hazards": [
+        {
+          "type": "Fall Risk",
+          "severity": "high",
+          "location": "Scaffold platform edge",
+          "description": "Missing guardrails and a large gap between the platform and the building facade.",
+          "recommendation": "Install standard guardrails and bridge the gap to the building wall."
+        },
+        {
+          "type": "PPE Violation",
+          "severity": "medium",
+          "location": "Worker on scaffold",
+          "description": "The worker is not wearing a high-visibility vest or a safety helmet, which are mandatory for construction site operations.",
+          "recommendation": "Enforce mandatory PPE policy including hard hats and high-visibility vests for all personnel."
+        },
+        {
+          "type": "Housekeeping",
+          "severity": "medium",
+          "location": "Scaffold platform",
+          "description": "Debris and loose materials are present on the platform, creating a tripping hazard.",
+          "recommendation": "Clear the platform of all unnecessary materials and debris to maintain a clean work surface."
+        }
+      ],
+      "immediate_actions": [
+        "Stop all work on the scaffold until guardrails are installed.",
+        "Require the worker to immediately don a hard hat and high-visibility vest.",
+        "Inspect the scaffold structure for stability and secure all loose planks."
+      ],
+      "summary": "The scaffold is currently unsafe due to missing fall protection and poor housekeeping. Immediate corrective action is required to install guardrails and ensure worker PPE compliance before work resumes."
+    }
+  },
+  {
+    "id": "photo-1c26e1dd",
+    "site_id": "site-1",
+    "filename": "site-1_292b1cfc0a.jpg",
+    "url": "/api/sites/site-1/images/site-1_292b1cfc0a.jpg",
+    "timestamp": "2026-11-17T18:04:40.718415+00:00",
+    "sender": "📱 Telegram: Ali",
+    "caption": "Rebar tied",
+    "safety_analysis": {
+      "overall_risk_level": "low",
+      "what_is_the_risk": "No major hazards detected. The work area appears clean and properly organized.",
+      "how_to_improve": "Continue keeping walkways clear of loose materials and wear safety gear at all times.",
+      "ppe_compliance": "compliant",
+      "summary": "Work area is safe and in good condition."
+    }
+  }
+]

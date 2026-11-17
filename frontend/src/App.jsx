@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { checkBackendHealth, getFeatures } from "./services/api";
+import { checkBackendHealth, getFeatures, getSites } from "./services/api";
 
 import SafetyMonitoring from "./features/SafetyMonitoring";
 import CrackDetection from "./features/CrackDetection";
@@ -47,17 +47,20 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState("checking");
   const [aiReady, setAiReady] = useState(false);
   const [features, setFeatures] = useState([]);
+  const [sitesCount, setSitesCount] = useState(0);
   const [apiError, setApiError] = useState("");
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [health, featureData] = await Promise.all([
+        const [health, featureData, sitesData] = await Promise.all([
           checkBackendHealth(),
           getFeatures(),
+          getSites().catch(() => ({ sites: [] })),
         ]);
         setBackendStatus(health.status);
         setAiReady(health.ai_ready ?? false);
+        setSitesCount(sitesData?.sites?.length ?? 0);
         setFeatures(
           featureData.features.map((f) => ({
             ...f,
@@ -138,7 +141,7 @@ export default function App() {
             </p>
             <h3>ConstructIQ AI Workspace</h3>
           </div>
-          <div className="profile">SO</div>
+          <div className="profile">SK</div>
         </header>
 
         {/* Hero — shown on all pages */}
@@ -186,9 +189,9 @@ export default function App() {
             {/* Stats row */}
             <section className="stats">
               <article className="stat-card">
-                <p>Active projects</p>
-                <h2>03</h2>
-                <span>Sample dashboard data</span>
+                <p>Monitored sites</p>
+                <h2>{String(sitesCount).padStart(2, "0")}</h2>
+                <span>Active construction projects</span>
               </article>
               <article className="stat-card">
                 <p>AI tools</p>

@@ -172,9 +172,15 @@ def create_or_setup_sites(count: int, site_names: list[str] | None = None) -> li
         existing_chat_id = existing.get("telegram_chat_id", "")
 
         # Check existing photos
-        existing_photos = _read_site_photos(site_id)
-        latest = existing_photos[-1] if existing_photos else None
-        analysis = latest.get("safety_analysis", {}) if latest else {}
+        if site_id not in existing_map:
+            _write_site_photos(site_id, [])
+            existing_photos = []
+            latest = None
+            analysis = {}
+        else:
+            existing_photos = _read_site_photos(site_id)
+            latest = existing_photos[-1] if existing_photos else None
+            analysis = latest.get("safety_analysis", {}) if latest else {}
 
         site_record = {
             "id": site_id,
@@ -243,12 +249,19 @@ def update_site(site_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_site(site_id: str) -> bool:
-    """Removes a site and archives its records."""
+    """Removes a site and cleans up its album records."""
     db = _read_sites_db()
     original_len = len(db.get("sites", []))
     db["sites"] = [s for s in db.get("sites", []) if s["id"] != site_id]
     if len(db["sites"]) < original_len:
         _write_sites_db(db)
+        # Clean up album file for deleted site to prevent zombie records
+        pf = get_site_photos_file(site_id)
+        if pf.exists():
+            try:
+                pf.unlink()
+            except Exception as e:
+                logger.warning("Could not delete photo file %s: %s", pf, e)
         return True
     return False
 
@@ -266,7 +279,8 @@ def add_site_photo(
     if not site:
         site = create_single_site(name=f"Site #{site_id.replace('site-', '')}")
 
-    ext = Path(filename).suffix.lower() or ".jpg"
+    raw_ext = Path(filename).suffix.lower()
+    ext = raw_ext if raw_ext in [".jpg", ".jpeg", ".png", ".webp"] else ".jpg"
     unique_name = f"{site_id}_{uuid.uuid4().hex[:10]}{ext}"
     dest_path = UPLOADS_DIR / unique_name
     with open(dest_path, "wb") as f:
@@ -288,21 +302,20 @@ def add_site_photo(
     photos.append(photo_record)
     _write_site_photos(site_id, photos)
 
-    # Update site metrics
+    # Update site metrics safely without overwriting concurrent metadata
     risk = safety_analysis.get("overall_risk_level", "low")
     ppe = safety_analysis.get("ppe_compliance", "compliant")
-    
-    site["overall_risk"] = risk
-    site["ppe_compliance"] = ppe
-    site["photo_count"] = len(photos)
-    site["latest_photo"] = photo_record
 
     db = _read_sites_db()
     for i, s in enumerate(db.get("sites", [])):
         if s["id"] == site_id:
-            db["sites"][i] = site
+            s["overall_risk"] = risk
+            s["ppe_compliance"] = ppe
+            s["photo_count"] = len(photos)
+            s["latest_photo"] = photo_record
+            db["sites"][i] = s
             break
     _write_sites_db(db)
 
-    logger.info("Added photo to %s (%s). Risk=%s", site_id, site["name"], risk)
+    logger.info("Added photo to %s (%s). Risk=%s", site_id, site.get("name", site_id), risk)
     return photo_record
