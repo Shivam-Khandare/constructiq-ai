@@ -64,7 +64,7 @@ class Settings(BaseSettings):
 
     # Gemini (production)
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     # Telegram Bot integration
     telegram_bot_token: str = ""
@@ -179,7 +179,7 @@ async def _check_ollama() -> bool:
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
-    """Parse JSON from model output, with fallback extraction."""
+    """Parse JSON from model output, with fallback extraction and list unwrap."""
     clean = raw.strip()
     if clean.startswith("```json"):
         clean = clean[7:]
@@ -189,13 +189,26 @@ def _extract_json(raw: str) -> dict[str, Any]:
         clean = clean[:-3]
     clean = clean.strip()
 
+    def _normalize_parsed(val: Any) -> dict[str, Any] | None:
+        if isinstance(val, dict):
+            return val
+        if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+            return val[0]
+        return None
+
     try:
-        return json.loads(clean)
+        parsed = json.loads(clean)
+        norm = _normalize_parsed(parsed)
+        if norm is not None:
+            return norm
     except json.JSONDecodeError:
         start, end = clean.find("{"), clean.rfind("}") + 1
         if start != -1 and end > start:
             try:
-                return json.loads(clean[start:end])
+                parsed = json.loads(clean[start:end])
+                norm = _normalize_parsed(parsed)
+                if norm is not None:
+                    return norm
             except json.JSONDecodeError:
                 pass
     logger.error("Cannot parse JSON from model output: %s", raw[:400])
@@ -240,12 +253,6 @@ async def _call_gemini(system: str, prompt: str,
             detail="AI service not configured. Set GEMINI_API_KEY in environment variables.",
         )
 
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{settings.gemini_model}:generateContent"
-        f"?key={settings.gemini_api_key}"
-    )
-
     parts: list[dict] = [{"text": f"{system}\n\n{prompt}"}]
 
     if image_bytes:
@@ -259,31 +266,48 @@ async def _call_gemini(system: str, prompt: str,
     payload = {
         "contents": [{"parts": parts}],
         "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 8192,
+            "temperature": 0.1,
+            "maxOutputTokens": 4096,
             "responseMimeType": "application/json",
         },
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post(url, json=payload)
-            r.raise_for_status()
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot reach Gemini API.")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Gemini API timed out.")
-    except httpx.HTTPStatusError as e:
-        body = e.response.text[:300]
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {body}")
+    # Model fallback chain: try preferred model, then proven vision models
+    models_to_try = [settings.gemini_model]
+    for alt in ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-3.5-flash-lite"]:
+        if alt not in models_to_try:
+            models_to_try.append(alt)
 
-    data = r.json()
-    try:
-        raw = data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        raise HTTPException(status_code=502, detail="Unexpected Gemini response format.")
+    last_error_desc = "Gemini API unavailable"
+    for candidate in models_to_try:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{candidate}:generateContent"
+            f"?key={settings.gemini_api_key}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=45) as c:
+                r = await c.post(url, json=payload)
+                if r.status_code == 200:
+                    data = r.json()
+                    try:
+                        raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                        return _extract_json(raw)
+                    except (KeyError, IndexError):
+                        logger.warning("Malformed candidate response from %s: %s", candidate, r.text[:200])
+                        continue
+                else:
+                    last_error_desc = f"Model {candidate} returned HTTP {r.status_code}: {r.text[:200]}"
+                    logger.warning("Gemini model %s failed: %s, attempting next candidate...", candidate, last_error_desc)
+                    continue
+        except httpx.TimeoutException:
+            logger.warning("Gemini model %s timed out, attempting next candidate...", candidate)
+            continue
+        except Exception as e:
+            logger.warning("Gemini model %s error (%s), attempting next candidate...", candidate, e)
+            continue
 
-    return _extract_json(raw)
+    raise HTTPException(status_code=502, detail=f"Gemini API error across all models: {last_error_desc}")
 
 
 async def call_ai(system: str, prompt: str,
@@ -302,74 +326,124 @@ async def _safety_analyzer_bridge(
     context: str = "",
     image_mime: str = "image/jpeg"
 ) -> dict[str, Any]:
-    """Plain-language construction safety evaluation without dense legal jargon."""
-    system = """You are a helpful construction site safety inspector.
-Analyze the site photo and explain any safety risks in clear, simple language that any worker, engineer, or supervisor can immediately understand. Avoid dense codes or legal jargon.
+    """Accurate multimodal construction site safety evaluation with plain-language feedback."""
+    system = """You are a senior civil engineer and certified construction safety auditor.
+Carefully examine the construction site photograph to identify actual hazards, structural defects, fall risks, trench/excavation dangers, electrical hazards, and PPE non-compliance.
 
-Return ONLY a valid JSON object:
+RISK LEVEL DEFINITIONS (assess strictly based on visible visual evidence):
+• CRITICAL: Imminent life-threatening hazard requiring immediate work stoppage.
+  - Workers at elevation (> 1.8m/6ft) or near open floor edges/scaffolding without any fall arrest harness or guardrails.
+  - Workers inside deep trenches or excavations (> 1.2m/4ft) without shoring walls, trench shields, or sloped banks.
+  - Workers directly underneath suspended crane loads or in blind spots of moving heavy equipment.
+  - Exposed live high-voltage electrical cables, sparking, or water pooling near electrical panels.
+  - Severe structural distress: bowing/buckling columns, major shear cracks, crumbling load-bearing elements.
+• HIGH: Serious hazard likely to cause severe injury or bone fracture.
+  - Incomplete scaffolding, missing guardrails, missing toe-boards, or makeshift scaffolding planks.
+  - Workers on steep ladders carrying heavy objects or using uninspected/damaged ladders.
+  - Unprotected floor openings, lift shafts, or skylights without secure covers or barricades.
+  - Loose materials or tools stacked precarious at platform edges.
+• MEDIUM: Moderate hazard or general safety non-compliance.
+  - Workers missing basic Personal Protective Equipment (PPE): hard hats/safety helmets, high-visibility reflective vests, protective boots, or eye goggles.
+  - Tripping hazards: loose rebar, tangled electrical cords across walkways, construction rubble blocking exits.
+  - Poor site housekeeping, blocked emergency egress, or unchained gas cylinders.
+• LOW: Area is safe, orderly, and compliant.
+  - Workers are properly wearing required safety gear (helmets, vests, boots).
+  - Walkways are clean and clear of debris.
+  - Proper guardrails, safety netting, and warning barricades are installed where required.
+  - No active or imminent hazards visible.
+
+Return ONLY a valid JSON object with these exact keys:
 {
-  "overall_risk_level": "low or medium or high or critical",
-  "what_is_the_risk": "Simple explanation of what risk or hazard is present (or 'No hazards spotted. The area is clean and safe.')",
-  "how_to_improve": "Clear, practical, step-by-step instructions on how to fix or prevent the risk",
-  "ppe_compliance": "compliant or partial or non-compliant or not-visible",
-  "summary": "1-2 simple sentences summarizing the safety state"
+  "overall_risk_level": "critical" | "high" | "medium" | "low",
+  "what_is_the_risk": "Detailed, plain-language description of the specific hazard visible in the photo (or confirmation that the area is clean, compliant, and safe).",
+  "how_to_improve": "Clear, step-by-step practical action to resolve the risk immediately.",
+  "ppe_compliance": "compliant" | "partial" | "non-compliant" | "not-visible",
+  "hazards": [
+    {
+      "type": "Fall Risk | Trench/Excavation | PPE Violation | Electrical | Housekeeping | Structural",
+      "severity": "critical | high | medium | low",
+      "location": "Specific location in photo (e.g., upper scaffold platform, trench floor, walkway)",
+      "description": "What is wrong",
+      "recommendation": "Corrective measure"
+    }
+  ],
+  "immediate_actions": ["Specific immediate action 1", "Specific immediate action 2"],
+  "summary": "1-2 sentence executive safety summary."
 }
-Return ONLY the JSON object."""
+"""
 
-    prompt = f"Analyze this construction site photo for safety.{' Context: ' + context if context else ''}"
+    prompt = f"Conduct a thorough safety inspection of this site photo. Describe what hazards you see and assign the exact risk level.{' Additional context from worker: ' + context if context else ''}"
     try:
         result = await call_ai(system, prompt, image_bytes, image_mime)
-        result.setdefault("overall_risk_level", "low")
+
+        # Normalize and validate overall_risk_level
+        risk_raw = str(result.get("overall_risk_level", "low")).strip().lower()
+        if "crit" in risk_raw:
+            risk = "critical"
+        elif "high" in risk_raw:
+            risk = "high"
+        elif "med" in risk_raw:
+            risk = "medium"
+        elif any(w in risk_raw for w in ["low", "safe", "none", "ok"]):
+            risk = "low"
+        else:
+            risk = "medium"
+        result["overall_risk_level"] = risk
+
+        # Ensure all required fields exist
         result.setdefault("what_is_the_risk", "Work area checked.")
         result.setdefault("how_to_improve", "Maintain standard safety precautions.")
         result.setdefault("ppe_compliance", "compliant")
         result.setdefault("summary", "Photo analyzed. Standard conditions observed.")
-        # Backward compatibility fields
         result.setdefault("hazards", [])
-        result.setdefault("immediate_actions", [result.get("how_to_improve", "None")])
+        if "immediate_actions" not in result or not result["immediate_actions"]:
+            result["immediate_actions"] = [result.get("how_to_improve", "Continue safe operations.")]
+
+        logger.info("Safety Analysis Complete: risk=%s, hazards=%d, ppe=%s",
+                    result["overall_risk_level"], len(result.get("hazards", [])), result.get("ppe_compliance"))
         return result
     except Exception as e:
-        logger.warning("AI provider unavailable for safety analysis (%s). Applying plain-language engine.", e)
+        logger.exception("AI provider failed for safety analysis: %s. Using emergency fallback.", e)
         ctx = (context or "").lower()
-        if any(k in ctx for k in ["trench", "pit", "hole", "cave", "excavat", "shoring", "mud", "soil"]):
+        if any(k in ctx for k in ["trench", "pit", "hole", "cave", "excavat", "mud", "soil"]):
             return {
                 "overall_risk_level": "critical",
-                "what_is_the_risk": "Deep open pit or trench without protective barriers or wall supports. Workers are at high risk of falling in or being caught in a cave-in.",
-                "how_to_improve": "Stop work inside the trench immediately. Place warning barricades around the edge and install trench boxes or slope the sides before anyone enters.",
+                "what_is_the_risk": "Deep open excavation or trench without shoring walls or barricades. High danger of soil collapse or worker fall.",
+                "how_to_improve": "Stop work inside the trench immediately. Install trench boxes/shoring and place warning barricades around perimeter.",
                 "ppe_compliance": "partial",
-                "summary": "Deep pit is open and unprotected. Immediate barriers required.",
-                "hazards": [{"type": "Open Pit / Trench Danger", "severity": "critical", "location": "Excavation edge", "description": "Unprotected open trench", "recommendation": "Install barriers and shoring"}],
-                "immediate_actions": ["Stop work inside pit", "Erect warning barriers"]
+                "summary": "Deep trench is open and unprotected. Immediate shoring and barricades required.",
+                "hazards": [{"type": "Trench Collapse", "severity": "critical", "location": "Excavation edge", "description": "Unshored trench", "recommendation": "Install trench shields"}],
+                "immediate_actions": ["Stop work inside pit", "Install barricades"]
             }
-        elif any(k in ctx for k in ["height", "scaffold", "fall", "roof", "beam", "slab", "ladder", "edge"]):
+        elif any(k in ctx for k in ["height", "scaffold", "fall", "roof", "beam", "edge"]):
             return {
                 "overall_risk_level": "high",
-                "what_is_the_risk": "Workers are at height without safety harnesses or guardrails on the platform edge, posing a serious fall risk.",
-                "how_to_improve": "Put on full-body safety harnesses and clip them to secure anchor lines. Install sturdy guardrails along the exposed platform edge.",
+                "what_is_the_risk": "Workers at height without safety harnesses or perimeter guardrails.",
+                "how_to_improve": "Put on full-body safety harnesses clipped to certified anchor lines. Erect sturdy guardrails.",
                 "ppe_compliance": "partial",
                 "summary": "Fall hazard at height. Safety harnesses and guardrails are needed immediately.",
-                "hazards": [{"type": "Fall Risk at Height", "severity": "high", "location": "Platform edge", "description": "No harnesses or guardrails", "recommendation": "Wear safety harnesses and install railings"}],
-                "immediate_actions": ["Attach safety harness to anchor point", "Install edge guardrail"]
+                "hazards": [{"type": "Fall Hazard", "severity": "high", "location": "Elevated platform", "description": "No fall arrest gear", "recommendation": "Clip safety harnesses"}],
+                "immediate_actions": ["Clip safety harness", "Install guardrails"]
             }
-        elif any(k in ctx for k in ["helmet", "hat", "vest", "boot", "glove", "glasses", "ppe"]):
+        elif any(k in ctx for k in ["helmet", "hat", "vest", "ppe"]):
             return {
                 "overall_risk_level": "medium",
-                "what_is_the_risk": "Some personnel are not wearing hard hats or reflective vests in an active work area.",
-                "how_to_improve": "Make sure every worker puts on their safety helmet and high-visibility vest before entering the job site.",
+                "what_is_the_risk": "Personnel missing safety helmets or high-visibility reflective vests.",
+                "how_to_improve": "Enforce mandatory hard hats and reflective vests before anyone enters the active work area.",
                 "ppe_compliance": "non-compliant",
-                "summary": "Workers are missing hard hats or reflective vests.",
-                "hazards": [{"type": "Missing Safety Gear", "severity": "medium", "location": "Work zone", "description": "Missing helmets/vests", "recommendation": "Provide and enforce hard hats"}],
-                "immediate_actions": ["Issue hard hats to all personnel"]
+                "summary": "Missing PPE: hard hats or high-vis vests not observed.",
+                "hazards": [{"type": "PPE Violation", "severity": "medium", "location": "Active zone", "description": "Missing hard hats", "recommendation": "Issue safety helmets"}],
+                "immediate_actions": ["Issue hard hats and vests"]
             }
         else:
             return {
-                "overall_risk_level": "low",
-                "what_is_the_risk": "No major safety hazards detected. Workers are using proper precautions and the work area is clean.",
-                "how_to_improve": "Keep walking paths clear of tripping hazards and continue wearing safety gear.",
-                "ppe_compliance": "compliant",
-                "summary": "Work area is in safe and compliant condition.",
+                "overall_risk_level": "medium",
+                "what_is_the_risk": "Safety check performed. Please verify workers are wearing hard hats, reflective vests, and that walkways remain clear.",
+                "how_to_improve": "Conduct a quick pre-shift toolbox talk, ensure all personnel wear required safety gear, and maintain clear walking paths.",
+                "ppe_compliance": "partial",
+                "summary": "Safety check completed. Standard precautions recommended.",
                 "hazards": [],
-                "immediate_actions": ["Continue standard daily precautions"]
+                "immediate_actions": ["Perform daily site safety check"]
             }
 
 
