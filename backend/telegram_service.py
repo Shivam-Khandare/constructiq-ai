@@ -4,9 +4,13 @@ Routes photos directly from dedicated Telegram groups (e.g. Site 3 Group)
 to that site's screen in real time with plain-language safety feedback.
 
 Features:
-  • Inline buttons so workers don't need to type commands
-  • Robust supergroup chat-ID matching (handles Telegram's -100 prefix)
-  • Real-time photo routing + AI safety analysis reply
+  • Persistent Reply Keyboard (large mobile buttons at bottom of chat for illiterate workers)
+  • Inline Keyboard buttons attached to bot messages
+  • Automatic site button updates when new sites are added
+  • Pending photo holding (if photo sent before site selection, 1-tap assigns it)
+  • Telegram Menu button registration (setMyCommands & setChatMenuButton)
+  • Auto-welcome when bot is added to any group
+  • Supergroup chat-ID normalization (handles Telegram's -100 prefix)
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from typing import Any, Callable, Coroutine
 import httpx
 
 from sites_service import (
+    _all_tg_variants,
     add_site_photo,
     get_all_sites,
     get_site,
@@ -50,6 +55,9 @@ class TelegramService:
         self.analyzer_fn: Callable[
             [bytes, str, str], Coroutine[Any, Any, dict[str, Any]]
         ] | None = None
+        # Cache for pending photos sent before site is selected
+        # chat_id -> dict with img_bytes, filename, sender_name, caption, msg_id
+        self.pending_photos: dict[str, dict[str, Any]] = {}
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
@@ -117,10 +125,39 @@ class TelegramService:
             "Telegram Bot linked: @%s (%s)", self.bot_username, self.bot_first_name
         )
 
+        # Register bot commands & menu button in Telegram
+        await self._setup_bot_commands()
+
         if not webhook_url:
             self.start_polling()
 
         return self.get_status()
+
+    async def _setup_bot_commands(self) -> None:
+        """Configures official Telegram Bot Menu and Commands."""
+        if not self.token:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                # 1. Set commands list
+                commands = [
+                    {"command": "menu", "description": "📱 Show Site Selection Buttons"},
+                    {"command": "bind", "description": "📍 Link this group to a site"},
+                    {"command": "status", "description": "ℹ️ Check currently linked site"},
+                    {"command": "help", "description": "👷 Help & Instructions"},
+                ]
+                await client.post(
+                    f"{TELEGRAM_API_BASE}/bot{self.token}/setMyCommands",
+                    json={"commands": commands},
+                )
+                # 2. Set default menu button
+                await client.post(
+                    f"{TELEGRAM_API_BASE}/bot{self.token}/setChatMenuButton",
+                    json={"menu_button": {"type": "commands"}},
+                )
+                logger.info("Configured Telegram bot commands and menu button")
+        except Exception as e:
+            logger.warning("Could not set bot commands: %s", e)
 
     def get_status(self) -> dict[str, Any]:
         return {
@@ -178,7 +215,7 @@ class TelegramService:
             "offset": self.last_update_id + 1,
             "timeout": 8,
             "allowed_updates": json.dumps(
-                ["message", "channel_post", "callback_query"]
+                ["message", "channel_post", "callback_query", "my_chat_member"]
             ),
         }
 
@@ -235,7 +272,7 @@ class TelegramService:
         reply_to_message_id: int | None = None,
         reply_markup: dict[str, Any] | None = None,
     ) -> bool:
-        """Send a text message, optionally with inline keyboard buttons."""
+        """Send a text message with optional inline or reply keyboard."""
         if not self.token:
             return False
         url = f"{TELEGRAM_API_BASE}/bot{self.token}/sendMessage"
@@ -259,7 +296,7 @@ class TelegramService:
     async def answer_callback_query(
         self, callback_query_id: str, text: str = ""
     ) -> bool:
-        """Acknowledge a button press."""
+        """Acknowledge an inline button tap."""
         if not self.token:
             return False
         url = f"{TELEGRAM_API_BASE}/bot{self.token}/answerCallbackQuery"
@@ -281,7 +318,7 @@ class TelegramService:
         text: str,
         reply_markup: dict[str, Any] | None = None,
     ) -> bool:
-        """Edit a previously sent message (e.g. replace buttons with confirmation)."""
+        """Edit a previously sent message."""
         if not self.token:
             return False
         url = f"{TELEGRAM_API_BASE}/bot{self.token}/editMessageText"
@@ -300,17 +337,17 @@ class TelegramService:
             logger.error("Failed to edit message: %s", e)
             return False
 
-    # ── Button Builders ──────────────────────────────────────────────────────
+    # ── Button Builders (Inline & Reply Keyboards) ───────────────────────────
 
     @staticmethod
-    def _build_site_buttons(
+    def _build_inline_keyboard(
         action_prefix: str = "bind",
-        columns: int = 3,
+        columns: int = 2,
     ) -> dict[str, Any]:
-        """Build an InlineKeyboardMarkup with one button per site.
+        """Build InlineKeyboardMarkup with clean buttons for each site.
 
-        Each button's callback_data is ``{action_prefix}:{site_number}``,
-        e.g. ``bind:3``.  Buttons are arranged in rows of *columns*.
+        Automatically reads all sites from DB, so if a new site is added,
+        its button appears instantly.
         """
         sites = get_all_sites()
         buttons: list[list[dict[str, str]]] = []
@@ -319,54 +356,83 @@ class TelegramService:
         for s in sites:
             num = s["id"].replace("site-", "")
             label = f"📍 {s['name']}"
-            row.append(
-                {"text": label, "callback_data": f"{action_prefix}:{num}"}
-            )
+            row.append({"text": label, "callback_data": f"{action_prefix}:{num}"})
             if len(row) >= columns:
                 buttons.append(row)
                 row = []
         if row:
             buttons.append(row)
 
+        # Utility row
+        buttons.append([
+            {"text": "ℹ️ Check Status", "callback_data": "status"},
+            {"text": "🔄 Refresh Sites", "callback_data": "refresh"},
+        ])
+
         return {"inline_keyboard": buttons}
 
-    # ── Resolve which site a photo belongs to ────────────────────────────────
+    @staticmethod
+    def _build_reply_keyboard(columns: int = 2) -> dict[str, Any]:
+        """Build persistent ReplyKeyboardMarkup (large touch buttons on mobile).
+
+        Displays at the bottom of the chat screen so illiterate workers can
+        simply tap a button without typing anything.
+        """
+        sites = get_all_sites()
+        keyboard: list[list[dict[str, str]]] = []
+        row: list[dict[str, str]] = []
+
+        for s in sites:
+            label = f"📍 {s['name']}"
+            row.append({"text": label})
+            if len(row) >= columns:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+
+        # Bottom row for easy check
+        keyboard.append([
+            {"text": "ℹ️ Group Status"},
+            {"text": "🔄 Refresh Buttons"},
+        ])
+
+        return {
+            "keyboard": keyboard,
+            "resize_keyboard": True,
+            "is_persistent": True,
+            "one_time_keyboard": False,
+        }
+
+    # ── Site Resolution ──────────────────────────────────────────────────────
 
     def _resolve_target_site(self, text: str, chat_id: str | int) -> str | None:
-        """Return the site-id bound to *chat_id*, or None when unbound."""
+        """Returns the site-id bound to chat_id, or None when unbound."""
         chat_str = str(chat_id).strip()
-        logger.info("Resolving site for chat_id=%s", chat_str)
 
-        # 1. Lookup by stored telegram_chat_id (handles supergroup variants)
+        # 1. Stored telegram_chat_id lookup (handles supergroups with -100 prefix)
         site_by_chat = get_site_by_telegram_chat(chat_str)
         if site_by_chat:
-            logger.info(
-                "chat_id=%s → matched site %s (%s)",
-                chat_str,
-                site_by_chat["id"],
-                site_by_chat["name"],
-            )
+            logger.info("Resolved chat %s → site %s (%s)", chat_str, site_by_chat["id"], site_by_chat["name"])
             return site_by_chat["id"]
 
-        logger.warning(
-            "chat_id=%s not bound to any site. Stored bindings: %s",
-            chat_str,
-            [
-                (s["id"], s.get("telegram_chat_id", ""))
-                for s in get_all_sites()
-            ],
-        )
-        return None  # caller will prompt the user to pick a site
+        logger.info("chat_id %s is not currently bound to any site", chat_str)
+        return None
 
-    # ── Main update dispatcher ───────────────────────────────────────────────
+    # ── Update Processing (Main Router) ──────────────────────────────────────
 
     async def process_update(self, update: dict[str, Any]) -> dict[str, Any] | None:
-        # ── Handle callback_query (inline button press) ──────────────────
+        # 1. Handle Inline Button Clicks (callback_query)
         callback = update.get("callback_query")
         if callback:
             return await self._handle_callback_query(callback)
 
-        # ── Handle regular message / channel_post ────────────────────────
+        # 2. Handle Bot added to group (my_chat_member)
+        my_chat_member = update.get("my_chat_member")
+        if my_chat_member:
+            return await self._handle_my_chat_member(my_chat_member)
+
+        # 3. Handle Normal Message / Channel Post
         message = update.get("message") or update.get("channel_post")
         if not message:
             return None
@@ -385,115 +451,178 @@ class TelegramService:
         msg_id = message.get("message_id")
 
         logger.info(
-            "Incoming msg: chat_id=%s chat_type=%s text=%r photo=%s",
+            "Msg chat_id=%s (%s): text=%r photo=%s",
             chat_id,
             message["chat"].get("type"),
             text[:60] if text else caption[:60],
             bool(message.get("photo")),
         )
 
-        # ── /bind, /connect — show buttons or bind directly ─────────────
-        if text.startswith("/bind") or text.startswith("/connect"):
-            return await self._handle_bind_command(text, chat_id, msg_id)
+        # Handle new members (bot added to group)
+        if message.get("new_chat_members"):
+            for m in message["new_chat_members"]:
+                if (m.get("username") or "").lower() == self.bot_username.lower():
+                    return await self._send_welcome_menu(chat_id, msg_id)
 
-        # ── /start, /help — welcome message with buttons ────────────────
-        if text.startswith("/start") or text.startswith("/help"):
-            return await self._handle_start_command(chat_id, msg_id)
+        # Handle commands & button taps
+        text_lower = text.lower()
 
-        # ── /status — show which site this group is linked to ───────────
-        if text.startswith("/status"):
+        # Menu / Start / Help
+        if any(text_lower.startswith(cmd) for cmd in ["/start", "start", "/menu", "menu", "/help", "help", "/sites", "sites"]):
+            return await self._send_welcome_menu(chat_id, msg_id)
+
+        # Status check
+        if any(text_lower.startswith(cmd) for cmd in ["/status", "status", "ℹ️ group status", "check status"]):
             return await self._handle_status_command(chat_id, msg_id)
 
-        # ── Photo or image document ─────────────────────────────────────
+        # Refresh buttons
+        if any(text_lower.startswith(cmd) for cmd in ["refresh", "🔄 refresh", "🔄 refresh buttons"]):
+            return await self._handle_refresh_command(chat_id, msg_id)
+
+        # Bind command (e.g., "/bind 3", "bind 3", "site 3", "3", or "📍 Site 3")
+        site_match = self._extract_site_number(text)
+        if site_match is not None:
+            return await self._do_bind(chat_id, site_match, msg_id)
+
+        if text_lower.startswith("/bind") or text_lower.startswith("bind"):
+            # /bind without number -> show buttons
+            inline_kb = self._build_inline_keyboard("bind")
+            reply_kb = self._build_reply_keyboard()
+            await self.send_message(
+                chat_id,
+                "👇 Tap your construction site below:",
+                reply_to_message_id=msg_id,
+                reply_markup=inline_kb,
+            )
+            # Also deploy reply keyboard
+            await self.send_message(
+                chat_id,
+                "📱 Buttons are also ready at the bottom of your screen!",
+                reply_markup=reply_kb,
+            )
+            return None
+
+        # Photo or Document Image
         return await self._handle_photo(message, chat_id, sender_name, text, caption, msg_id)
 
-    # ── Command Handlers ─────────────────────────────────────────────────────
+    def _extract_site_number(self, text: str) -> int | None:
+        """Extracts site number from user text or reply-keyboard tap.
 
-    async def _handle_bind_command(
-        self, text: str, chat_id: int, msg_id: int
-    ) -> dict[str, Any] | None:
-        parts = text.split()
+        Examples matched:
+          '📍 Site 3' -> 3
+          'Site 3'    -> 3
+          '/bind 3'   -> 3
+          'bind 3'    -> 3
+          'site-3'    -> 3
+          '3'         -> 3 (only if pure digit under 50)
+        """
+        if not text:
+            return None
+        t = text.strip()
 
-        # /bind 3  → bind directly
-        if len(parts) > 1:
-            arg = (
-                parts[1]
-                .replace("#", "")
-                .replace("site", "")
-                .replace("-", "")
-                .replace("_", "")
-                .strip()
-            )
-            if arg.isdigit():
-                return await self._do_bind(chat_id, int(arg), msg_id)
+        # Pure digit (e.g. user just typed "3")
+        if t.isdigit() and 1 <= int(t) <= 50:
+            return int(t)
 
-        # /bind  (no number) → show buttons
-        keyboard = self._build_site_buttons("bind")
-        await self.send_message(
-            chat_id,
-            "👇 Tap a button below to link this group to a site:",
-            reply_to_message_id=msg_id,
-            reply_markup=keyboard,
-        )
+        # '📍 Site 3' or 'Site 3' or 'Site-3'
+        m = re.search(r"(?:📍\s*)?(?:site[\s\-_]?|#site[\s\-_]?|bind[\s\-_]?|/bind[\s\-_]?)(\d+)", t, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+
         return None
 
-    async def _handle_start_command(
-        self, chat_id: int, msg_id: int
-    ) -> dict[str, Any]:
-        # Check if already bound
-        bound_site = get_site_by_telegram_chat(chat_id)
-        if bound_site:
-            reply = (
-                f"👷 ConstructIQ Site Safety Bot\n\n"
-                f"✅ This group is linked to: {bound_site['name']}\n\n"
-                f"Just send a photo in this group and it will appear "
-                f"on the engineer's screen automatically!\n\n"
-                f"To change the linked site, type /bind or tap a button below:"
-            )
+    # ── Command & Menu Handlers ──────────────────────────────────────────────
+
+    async def _send_welcome_menu(self, chat_id: int, msg_id: int | None = None) -> dict[str, Any]:
+        """Sends comprehensive welcome message with both Inline and Reply keyboards."""
+        bound = get_site_by_telegram_chat(chat_id)
+        sites = get_all_sites()
+
+        if bound:
+            status_text = f"✅ Currently linked to: {bound['name']}\n"
         else:
-            reply = (
-                f"👷 ConstructIQ Site Safety Bot\n\n"
-                f"Link this group to one of your construction sites.\n"
-                f"After linking, any photo sent here will automatically "
-                f"show on the engineer's screen in real time!\n\n"
-                f"👇 Tap a site button to link:"
-            )
-        keyboard = self._build_site_buttons("bind")
-        await self.send_message(
-            chat_id, reply, reply_to_message_id=msg_id, reply_markup=keyboard
+            status_text = "⚠️ This group is NOT linked to any site yet.\n"
+
+        welcome_text = (
+            f"👷 ConstructIQ Site Safety Bot 🦺\n\n"
+            f"{status_text}\n"
+            f"📸 Photos sent here go directly to the engineer's live dashboard with AI safety analysis.\n\n"
+            f"👇 Tap your site button below to link this group:"
         )
-        return {"type": "start"}
 
-    async def _handle_status_command(
-        self, chat_id: int, msg_id: int
-    ) -> dict[str, Any] | None:
-        bound_site = get_site_by_telegram_chat(chat_id)
-        if bound_site:
+        inline_kb = self._build_inline_keyboard("bind")
+        reply_kb = self._build_reply_keyboard()
+
+        # 1. Send inline buttons message
+        await self.send_message(
+            chat_id,
+            welcome_text,
+            reply_to_message_id=msg_id,
+            reply_markup=inline_kb,
+        )
+
+        # 2. Deploy persistent mobile keyboard
+        await self.send_message(
+            chat_id,
+            "📱 Mobile buttons have been enabled at the bottom of your screen! Workers can tap any site button below:",
+            reply_markup=reply_kb,
+        )
+
+        return {"type": "welcome", "sites_count": len(sites)}
+
+    async def _handle_my_chat_member(self, my_chat_member: dict[str, Any]) -> dict[str, Any] | None:
+        """Triggered automatically when the bot is added or promoted in a group."""
+        new_status = my_chat_member.get("new_chat_member", {}).get("status")
+        if new_status in ("member", "administrator"):
+            chat_id = my_chat_member.get("chat", {}).get("id")
+            if chat_id:
+                logger.info("Bot added to group chat_id=%s, sending welcome menu", chat_id)
+                return await self._send_welcome_menu(chat_id)
+        return None
+
+    async def _handle_status_command(self, chat_id: int, msg_id: int) -> dict[str, Any]:
+        bound = get_site_by_telegram_chat(chat_id)
+        inline_kb = self._build_inline_keyboard("bind")
+        reply_kb = self._build_reply_keyboard()
+
+        if bound:
             reply = (
-                f"📍 This group is linked to: {bound_site['name']}\n"
-                f"📸 Photos sent here go to {bound_site['name']}'s album.\n\n"
-                f"To change, type /bind or tap a button below:"
-            )
-            keyboard = self._build_site_buttons("bind")
-            await self.send_message(
-                chat_id, reply, reply_to_message_id=msg_id, reply_markup=keyboard
+                f"📍 Group Linked To: {bound['name']}\n"
+                f"🏷️ Worksite: {bound.get('location', 'N/A')}\n"
+                f"👷 Supervisor: {bound.get('supervisor', 'N/A')}\n"
+                f"📸 Photos In Album: {bound.get('photo_count', 0)}\n\n"
+                f"To switch to a different site, tap any button below:"
             )
         else:
             reply = (
-                "⚠️ This group is NOT linked to any site yet.\n"
-                "👇 Tap a button below to link it:"
+                "⚠️ This group is not linked to any site.\n\n"
+                "👇 Tap a site button below to link it:"
             )
-            keyboard = self._build_site_buttons("bind")
-            await self.send_message(
-                chat_id, reply, reply_to_message_id=msg_id, reply_markup=keyboard
-            )
-        return {"type": "status"}
 
-    # ── Callback Query Handler (button press) ────────────────────────────────
+        await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=inline_kb)
+        await self.send_message(chat_id, "📱 Or tap a button from the keyboard at the bottom of your screen:", reply_markup=reply_kb)
+        return {"type": "status", "bound_site": bound["id"] if bound else None}
 
-    async def _handle_callback_query(
-        self, callback: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _handle_refresh_command(self, chat_id: int, msg_id: int) -> dict[str, Any]:
+        sites = get_all_sites()
+        reply_kb = self._build_reply_keyboard()
+        inline_kb = self._build_inline_keyboard("bind")
+        await self.send_message(
+            chat_id,
+            f"🔄 Site buttons refreshed! Total monitored sites: {len(sites)}\nTap a button to select:",
+            reply_to_message_id=msg_id,
+            reply_markup=inline_kb,
+        )
+        await self.send_message(
+            chat_id,
+            "📱 Mobile keyboard buttons updated:",
+            reply_markup=reply_kb,
+        )
+        return {"type": "refresh", "sites_count": len(sites)}
+
+    # ── Callback Query (Inline Button Click) ─────────────────────────────────
+
+    async def _handle_callback_query(self, callback: dict[str, Any]) -> dict[str, Any] | None:
         cb_id = callback["id"]
         cb_data = callback.get("data", "")
         message = callback.get("message", {})
@@ -501,12 +630,24 @@ class TelegramService:
         message_id = message.get("message_id")
 
         if not chat_id:
-            await self.answer_callback_query(cb_id, "Error: could not find chat")
+            await self.answer_callback_query(cb_id, "Error: missing chat")
             return None
 
         logger.info("Callback query: data=%r chat_id=%s", cb_data, chat_id)
 
-        # Parse callback_data like "bind:3"
+        # Status button
+        if cb_data == "status":
+            bound = get_site_by_telegram_chat(chat_id)
+            status_str = f"Linked to {bound['name']}" if bound else "Not linked yet"
+            await self.answer_callback_query(cb_id, status_str)
+            return await self._handle_status_command(chat_id, message_id)
+
+        # Refresh button
+        if cb_data == "refresh":
+            await self.answer_callback_query(cb_id, "Refreshed!")
+            return await self._handle_refresh_command(chat_id, message_id)
+
+        # Bind button (e.g. "bind:3")
         if cb_data.startswith("bind:"):
             try:
                 site_num = int(cb_data.split(":")[1])
@@ -516,24 +657,22 @@ class TelegramService:
 
             result = await self._do_bind(chat_id, site_num, reply_msg_id=None)
 
-            # Replace the button message with confirmation
             if result:
                 site = get_site(f"site-{site_num}")
                 site_name = site["name"] if site else f"Site {site_num}"
                 await self.edit_message_text(
                     chat_id,
                     message_id,
-                    f"✅ Group linked to: {site_name}\n\n"
-                    f"📸 Send any photo in this group and it will appear "
-                    f"on the engineer's screen automatically!",
+                    f"✅ Group linked to: {site_name}!\n\n"
+                    f"📸 Any photo sent here will now appear on {site_name}'s screen automatically.",
                 )
-            await self.answer_callback_query(cb_id, "Linked!")
+            await self.answer_callback_query(cb_id, f"Linked to Site {site_num}!")
             return result
 
         await self.answer_callback_query(cb_id)
         return None
 
-    # ── Core Bind Logic ──────────────────────────────────────────────────────
+    # ── Bind Execution ───────────────────────────────────────────────────────
 
     async def _do_bind(
         self, chat_id: int, site_num: int, reply_msg_id: int | None
@@ -545,43 +684,48 @@ class TelegramService:
             await self.send_message(chat_id, reply, reply_to_message_id=reply_msg_id)
             return None
 
-        # First, clear any OTHER site that was previously bound to this chat
+        # 1. Clear any other site that had this chat_id previously
         chat_str = str(chat_id)
-        all_sites = get_all_sites()
-        for s in all_sites:
+        for s in get_all_sites():
             stored = str(s.get("telegram_chat_id", "")).strip()
             if stored and s["id"] != target_site_id:
-                # Check if this stored ID matches the current chat
-                from sites_service import _all_tg_variants
                 if _all_tg_variants(stored) & _all_tg_variants(chat_str):
-                    logger.info(
-                        "Clearing old binding: %s had chat_id=%s",
-                        s["id"], stored,
-                    )
+                    logger.info("Clearing old binding: %s had chat_id=%s", s["id"], stored)
                     update_site(s["id"], {"telegram_chat_id": ""})
 
-        # Now bind the target site to this chat
+        # 2. Bind target site to this chat
         update_site(target_site_id, {"telegram_chat_id": chat_str})
+        logger.info("BIND SUCCESS: chat_id=%s → %s (%s)", chat_str, target_site_id, site["name"])
 
-        # Verify the write actually worked
-        updated_site = get_site(target_site_id)
-        saved_id = str(updated_site.get("telegram_chat_id", "")) if updated_site else ""
-        logger.info(
-            "BIND: chat_id=%s → %s (%s). Verified stored=%s",
-            chat_str, target_site_id, site["name"], saved_id,
-        )
-
+        # 3. Confirm with user
+        reply_kb = self._build_reply_keyboard()
         reply = (
             f"✅ Group linked successfully!\n\n"
-            f"📍 This group → {site['name']}\n"
+            f"📍 Connected to: {site['name']}\n"
             f"🆔 Group ID: {chat_id}\n\n"
-            f"📸 From now on, just send any photo here and it will\n"
-            f"appear on the engineer's screen for {site['name']} in real time!"
+            f"📸 Send any photo in this group and it will automatically appear "
+            f"on {site['name']}'s live album on the engineer's dashboard!"
         )
-        await self.send_message(chat_id, reply, reply_to_message_id=reply_msg_id)
+        await self.send_message(chat_id, reply, reply_to_message_id=reply_msg_id, reply_markup=reply_kb)
+
+        # 4. Check if there was a pending photo waiting to be processed!
+        chat_key = str(chat_id)
+        if chat_key in self.pending_photos:
+            pending = self.pending_photos.pop(chat_key)
+            logger.info("Processing pending photo for newly bound %s", target_site_id)
+            await self._process_and_save_photo(
+                target_site_id=target_site_id,
+                img_bytes=pending["img_bytes"],
+                filename=pending["filename"],
+                sender_name=pending["sender_name"],
+                caption=pending["caption"],
+                chat_id=chat_id,
+                msg_id=pending["msg_id"],
+            )
+
         return {"type": "bind", "site_id": target_site_id}
 
-    # ── Photo Handler ────────────────────────────────────────────────────────
+    # ── Photo Ingestion & Processing ─────────────────────────────────────────
 
     async def _handle_photo(
         self,
@@ -609,38 +753,74 @@ class TelegramService:
         if not file_id:
             return None
 
-        # Try to resolve which site this group belongs to
-        combined_text = f"{text} {caption}".strip()
-        target_site_id = self._resolve_target_site(combined_text, chat_id)
-
-        if target_site_id is None:
-            # Group not bound — ask the worker to pick a site via buttons
-            keyboard = self._build_site_buttons("bind")
-            await self.send_message(
-                chat_id,
-                "⚠️ This group is not linked to any site yet.\n"
-                "Your photo was received but I need to know which site it belongs to.\n\n"
-                "👇 Tap a button below to link this group, then send the photo again:",
-                reply_to_message_id=msg_id,
-                reply_markup=keyboard,
-            )
-            return None
-
-        # Download the photo from Telegram
+        # Download image from Telegram
         try:
             img_bytes, filename = await self.download_telegram_file(file_id)
         except Exception as e:
             logger.error("Failed to download photo from Telegram: %s", e)
             return None
 
+        combined_text = f"{text} {caption}".strip()
+        target_site_id = self._resolve_target_site(combined_text, chat_id)
+
+        # Case A: Group is NOT linked to any site yet
+        if target_site_id is None:
+            # Save pending photo so worker only needs to tap a button ONCE!
+            chat_key = str(chat_id)
+            self.pending_photos[chat_key] = {
+                "img_bytes": img_bytes,
+                "filename": filename_hint,
+                "sender_name": sender_name,
+                "caption": caption or text,
+                "msg_id": msg_id,
+            }
+
+            inline_kb = self._build_inline_keyboard("bind")
+            reply_kb = self._build_reply_keyboard()
+            await self.send_message(
+                chat_id,
+                f"📸 Photo received from {sender_name}!\n\n"
+                f"⚠️ This group is not linked to a site yet.\n"
+                f"👇 Please tap your construction site below to save the photo:",
+                reply_to_message_id=msg_id,
+                reply_markup=inline_kb,
+            )
+            await self.send_message(
+                chat_id,
+                "📱 Or tap a button from the keyboard at the bottom:",
+                reply_markup=reply_kb,
+            )
+            return None
+
+        # Case B: Group is already linked -> process immediately
+        return await self._process_and_save_photo(
+            target_site_id=target_site_id,
+            img_bytes=img_bytes,
+            filename=filename,
+            sender_name=sender_name,
+            caption=caption or text,
+            chat_id=chat_id,
+            msg_id=msg_id,
+        )
+
+    async def _process_and_save_photo(
+        self,
+        target_site_id: str,
+        img_bytes: bytes,
+        filename: str,
+        sender_name: str,
+        caption: str,
+        chat_id: int,
+        msg_id: int,
+    ) -> dict[str, Any]:
         site = get_site(target_site_id)
         site_name = site["name"] if site else f"Site {target_site_id}"
 
-        # Analyze with AI (plain-language safety evaluation)
-        context = f"Site: {site_name}. Note from worker: {caption or text}"
+        # Analyze with AI
+        context = f"Site: {site_name}. Worker note: {caption}"
         safety_analysis = await self._analyze(img_bytes, context)
 
-        # Store photo in that site's album
+        # Store photo in album
         sender_label = f"📱 Telegram: {sender_name}"
         record = add_site_photo(
             site_id=target_site_id,
@@ -651,34 +831,37 @@ class TelegramService:
             safety_analysis=safety_analysis,
         )
 
-        # Reply in the group with plain-language feedback
         risk = safety_analysis.get("overall_risk_level", "low").upper()
-        what_risk = safety_analysis.get(
-            "what_is_the_risk", "No major hazards detected."
-        )
-        how_fix = safety_analysis.get(
-            "how_to_improve",
-            "Continue maintaining clean and safe work conditions.",
-        )
+        what_risk = safety_analysis.get("what_is_the_risk", "No major hazards detected.")
+        how_fix = safety_analysis.get("how_to_improve", "Continue maintaining clean and safe work conditions.")
 
         if risk in ("HIGH", "CRITICAL"):
             reply = (
                 f"🚨 SAFETY ALERT for {site_name}\n\n"
-                f"Risk Level: {risk}\n"
-                f"What is the risk: {what_risk}\n\n"
-                f"How to fix it: {how_fix}\n\n"
-                f"Photo has been updated on the engineer's live screen."
+                f"⚠️ Risk Level: {risk}\n"
+                f"🔍 What is the risk: {what_risk}\n\n"
+                f"🛠️ How to fix it: {how_fix}\n\n"
+                f"✅ Photo uploaded to engineer's live dashboard."
             )
         else:
             reply = (
                 f"✅ Photo received for {site_name}!\n\n"
-                f"Risk Level: Safe / {risk}\n"
-                f"Inspection: {what_risk}\n"
-                f"Recommendation: {how_fix}\n\n"
-                f"Updated on engineer's screen."
+                f"🛡️ Safety Status: {risk}\n"
+                f"🔍 Observation: {what_risk}\n"
+                f"💡 Recommendation: {how_fix}\n\n"
+                f"✅ Added to engineer's live dashboard."
             )
 
-        await self.send_message(chat_id, reply, reply_to_message_id=msg_id)
+        # Provide quick action button to switch site if worker sent to wrong site
+        quick_kb = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔄 Switch Site", "callback_data": "refresh"},
+                    {"text": "ℹ️ Status", "callback_data": "status"},
+                ]
+            ]
+        }
+        await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=quick_kb)
 
         return {
             "type": "photo_ingested",
@@ -689,7 +872,7 @@ class TelegramService:
             "photo_id": record["id"],
         }
 
-    # ── AI Safety Analysis ───────────────────────────────────────────────────
+    # ── AI Analysis ──────────────────────────────────────────────────────────
 
     async def _analyze(self, image_bytes: bytes, context: str) -> dict[str, Any]:
         """Calls safety analyzer or returns simple, human-friendly fallback."""
@@ -697,15 +880,10 @@ class TelegramService:
             try:
                 return await self.analyzer_fn(image_bytes, context, "image/jpeg")
             except Exception as e:
-                logger.warning(
-                    "AI analyzer error: %s. Using simple inspection engine.", e
-                )
+                logger.warning("AI analyzer error: %s. Using simple inspection engine.", e)
 
         ctx_lower = context.lower()
-        if any(
-            w in ctx_lower
-            for w in ["trench", "pit", "hole", "cave", "excavat", "mud", "soil"]
-        ):
+        if any(w in ctx_lower for w in ["trench", "pit", "hole", "cave", "excavat", "mud", "soil"]):
             return {
                 "overall_risk_level": "critical",
                 "what_is_the_risk": (
@@ -719,10 +897,7 @@ class TelegramService:
                 "ppe_compliance": "partial",
                 "summary": "Deep pit is open and unprotected. Immediate barriers required.",
             }
-        elif any(
-            w in ctx_lower
-            for w in ["height", "fall", "scaffold", "ladder", "edge", "slab", "roof"]
-        ):
+        elif any(w in ctx_lower for w in ["height", "fall", "scaffold", "ladder", "edge", "slab", "roof"]):
             return {
                 "overall_risk_level": "high",
                 "what_is_the_risk": (
@@ -736,10 +911,7 @@ class TelegramService:
                 "ppe_compliance": "partial",
                 "summary": "Fall danger at high elevation. Safety harnesses must be worn and clipped.",
             }
-        elif any(
-            w in ctx_lower
-            for w in ["helmet", "hat", "boot", "vest", "glove", "glasses", "ppe"]
-        ):
+        elif any(w in ctx_lower for w in ["helmet", "hat", "boot", "vest", "glove", "glasses", "ppe"]):
             return {
                 "overall_risk_level": "medium",
                 "what_is_the_risk": (
