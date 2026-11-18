@@ -99,7 +99,7 @@ class TelegramService:
 
         url = f"{TELEGRAM_API_BASE}/bot{clean_token}/getMe"
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=25) as client:
                 r = await client.get(url)
                 data = r.json()
         except Exception as e:
