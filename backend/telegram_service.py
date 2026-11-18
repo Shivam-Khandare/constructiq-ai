@@ -407,10 +407,24 @@ class TelegramService:
     # ── Site Resolution ──────────────────────────────────────────────────────
 
     def _resolve_target_site(self, text: str, chat_id: str | int) -> str | None:
-        """Returns the site-id bound to chat_id, or None when unbound."""
-        chat_str = str(chat_id).strip()
+        """Returns the target site-id for an incoming photo or message.
 
-        # 1. Stored telegram_chat_id lookup (handles supergroups with -100 prefix)
+        Resolution Order:
+        1. Explicit site tag in photo caption / text (e.g. #site2, site 2, Site 3, 📍 Site 1)
+        2. Group/chat bound site (stored telegram_chat_id)
+        3. None (triggers interactive button prompt)
+        """
+        # 1. Check if caption or message explicitly specifies a site (e.g. worker captions #site3)
+        if text:
+            site_num = self._extract_site_number(text)
+            if site_num is not None:
+                candidate_id = f"site-{site_num}"
+                if get_site(candidate_id):
+                    logger.info("Resolved site from caption/text tag: %r → %s", text[:40], candidate_id)
+                    return candidate_id
+
+        # 2. Stored telegram_chat_id lookup (handles supergroups with -100 prefix)
+        chat_str = str(chat_id).strip()
         site_by_chat = get_site_by_telegram_chat(chat_str)
         if site_by_chat:
             logger.info("Resolved chat %s → site %s (%s)", chat_str, site_by_chat["id"], site_by_chat["name"])
@@ -458,33 +472,55 @@ class TelegramService:
             bool(message.get("photo")),
         )
 
-        # Handle new members (bot added to group)
+        # Handle new members (bot added or human members added to group)
         if message.get("new_chat_members"):
+            bot_added = False
+            new_human_names = []
+            bot_uname = (self.bot_username or "").lower()
             for m in message["new_chat_members"]:
-                if (m.get("username") or "").lower() == self.bot_username.lower():
-                    return await self._send_welcome_menu(chat_id, msg_id)
+                m_uname = (m.get("username") or "").lower()
+                if bot_uname and m_uname == bot_uname:
+                    bot_added = True
+                else:
+                    first = m.get("first_name", "")
+                    last = m.get("last_name", "")
+                    name = f"{first} {last}".strip() or m.get("username", "Member")
+                    new_human_names.append(name)
+
+            if bot_added:
+                return await self._send_welcome_menu(chat_id, msg_id)
+            elif new_human_names:
+                return await self._send_new_member_welcome(chat_id, new_human_names, msg_id)
 
         # Handle commands & button taps
         text_lower = text.lower()
+        bot_uname = (self.bot_username or "").lower()
+        clean_text = text_lower
+        if bot_uname:
+            clean_text = clean_text.replace(f"@{bot_uname}", "").strip()
 
-        # Menu / Start / Help
-        if any(text_lower.startswith(cmd) for cmd in ["/start", "start", "/menu", "menu", "/help", "help", "/sites", "sites"]):
+        # Menu / Start / Help / Buttons
+        is_menu_cmd = (
+            any(clean_text.startswith(cmd) for cmd in ["/start", "start", "/menu", "menu", "/help", "help", "/sites", "sites", "buttons", "/buttons"])
+            or (bot_uname and f"@{bot_uname}" in text_lower and clean_text in ["", "menu", "help", "hi", "hello", "sites"])
+        )
+        if is_menu_cmd:
             return await self._send_welcome_menu(chat_id, msg_id)
 
         # Status check
-        if any(text_lower.startswith(cmd) for cmd in ["/status", "status", "ℹ️ group status", "check status"]):
+        if any(clean_text.startswith(cmd) for cmd in ["/status", "status", "ℹ️ group status", "check status"]):
             return await self._handle_status_command(chat_id, msg_id)
 
         # Refresh buttons
-        if any(text_lower.startswith(cmd) for cmd in ["refresh", "🔄 refresh", "🔄 refresh buttons"]):
+        if any(clean_text.startswith(cmd) for cmd in ["refresh", "🔄 refresh", "🔄 refresh buttons"]):
             return await self._handle_refresh_command(chat_id, msg_id)
 
         # Bind command (e.g., "/bind 3", "bind 3", "site 3", "3", or "📍 Site 3")
-        site_match = self._extract_site_number(text)
+        site_match = self._extract_site_number(clean_text)
         if site_match is not None:
             return await self._do_bind(chat_id, site_match, msg_id)
 
-        if text_lower.startswith("/bind") or text_lower.startswith("bind"):
+        if clean_text.startswith("/bind") or clean_text.startswith("bind"):
             # /bind without number -> show buttons
             inline_kb = self._build_inline_keyboard("bind")
             reply_kb = self._build_reply_keyboard()
@@ -550,15 +586,18 @@ class TelegramService:
         sites = get_all_sites()
 
         if bound:
-            status_text = f"✅ Currently linked to: {bound['name']}\n"
+            status_text = f"📍 Currently linked to: <b>{bound['name']}</b> ({bound.get('location', 'Worksite')})\n"
         else:
             status_text = "⚠️ This group is NOT linked to any site yet.\n"
 
         welcome_text = (
-            f"👷 ConstructIQ Site Safety Bot 🦺\n\n"
+            f"👷 <b>ConstructIQ Site Safety Bot</b> 🦺\n\n"
             f"{status_text}\n"
-            f"📸 Photos sent here go directly to the engineer's live dashboard with AI safety analysis.\n\n"
-            f"👇 Tap your site button below to link this group:"
+            f"📸 <b>How to upload photos:</b>\n"
+            f"• Drop, paste, or send photos in this chat anytime (from phone or laptop).\n"
+            f"• Photos are automatically analyzed for hazards and logged to the live dashboard.\n\n"
+            f"👇 <b>Select / Switch Site:</b>\n"
+            f"Click or tap any button below to link this group to that site:"
         )
 
         inline_kb = self._build_inline_keyboard("bind")
@@ -575,11 +614,44 @@ class TelegramService:
         # 2. Deploy persistent mobile keyboard
         await self.send_message(
             chat_id,
-            "📱 Mobile buttons have been enabled at the bottom of your screen! Workers can tap any site button below:",
+            "💡 <i>Tip: On mobile, persistent buttons are ready at the bottom. On laptop, click the buttons above or click the keyboard icon next to your message box!</i>",
             reply_markup=reply_kb,
         )
 
         return {"type": "welcome", "sites_count": len(sites)}
+
+    async def _send_new_member_welcome(
+        self, chat_id: int, names: list[str], msg_id: int | None = None
+    ) -> dict[str, Any]:
+        """Greets newly added human members with clear instructions and clickable site buttons."""
+        bound = get_site_by_telegram_chat(chat_id)
+        names_str = ", ".join(names)
+
+        if bound:
+            status_text = f"📍 This group is currently logging photos to: <b>{bound['name']}</b> ({bound.get('location', 'Worksite')}).\n"
+        else:
+            status_text = "⚠️ This group is not linked to any site yet.\n"
+
+        welcome_text = (
+            f"👋 Welcome <b>{names_str}</b> to ConstructIQ Site Monitoring!\n\n"
+            f"{status_text}\n"
+            f"📸 <b>How to upload site photos:</b>\n"
+            f"• Simply drop, paste, or send photos in this chat from your laptop or phone.\n"
+            f"• AI automatically inspects safety hazards, PPE compliance, and logs them to the live dashboard.\n"
+            f"• If you want to specify a particular site in your caption, just write <code>#site1</code>, <code>#site2</code>, etc.\n\n"
+            f"👇 Click any button below to view or change the linked site:"
+        )
+
+        inline_kb = self._build_inline_keyboard("bind")
+        reply_kb = self._build_reply_keyboard()
+
+        await self.send_message(chat_id, welcome_text, reply_to_message_id=msg_id, reply_markup=inline_kb)
+        await self.send_message(
+            chat_id,
+            "💡 <i>Tip: Tap buttons above on laptop, or use the mobile buttons at the bottom of your screen!</i>",
+            reply_markup=reply_kb,
+        )
+        return {"type": "new_member_welcome", "members": names}
 
     async def _handle_my_chat_member(self, my_chat_member: dict[str, Any]) -> dict[str, Any] | None:
         """Triggered automatically when the bot is added or promoted in a group."""
@@ -763,9 +835,11 @@ class TelegramService:
         elif message.get("document"):
             doc = message["document"]
             mime = (doc.get("mime_type") or "").lower()
-            if mime.startswith("image/"):
+            fname = (doc.get("file_name") or "").lower()
+            is_img_ext = any(fname.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".bmp"])
+            if mime.startswith("image/") or is_img_ext:
                 file_id = doc.get("file_id")
-                filename_hint = doc.get("file_name") or "phone_photo.jpg"
+                filename_hint = doc.get("file_name") or "laptop_photo.jpg"
 
         if not file_id:
             return None
