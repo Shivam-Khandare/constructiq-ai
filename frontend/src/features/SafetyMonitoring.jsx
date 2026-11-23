@@ -10,7 +10,6 @@ import {
   getTelegramStatus,
   pollTelegramNow,
   setupSites,
-  simulateTelegramUpload,
   updateSite,
   uploadSitePhoto,
   validateImageFile,
@@ -38,7 +37,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
     name: "",
     location: "",
     supervisor: "",
-    telegram_chat_id: "",
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -48,7 +46,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
     name: "",
     location: "",
     supervisor: "",
-    telegram_chat_id: "",
   });
   const [addingSite, setAddingSite] = useState(false);
 
@@ -57,16 +54,7 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
   const [telegramTokenInput, setTelegramTokenInput] = useState("");
   const [telegramMsg, setTelegramMsg] = useState("");
 
-  // 5. Simulate Telegram phone upload modal
-  const [isSimulateOpen, setIsSimulateOpen] = useState(false);
-  const [simulateSiteId, setSimulateSiteId] = useState("");
-  const [simulateFile, setSimulateFile] = useState(null);
-  const [simulateSender, setSimulateSender] = useState("Worker on Phone");
-  const [simulateCaption, setSimulateCaption] = useState("Photo from site scaffolding");
-  const [simulating, setSimulating] = useState(false);
-  const [simulateResult, setSimulateResult] = useState(null);
-
-  // 6. Direct Site upload modal
+  // 5. Direct Site upload modal
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadSiteId, setUploadSiteId] = useState("");
   const [uploadFile, setUploadFile] = useState(null);
@@ -152,7 +140,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
       name: site.name || "",
       location: site.location || "",
       supervisor: site.supervisor || "",
-      telegram_chat_id: site.telegram_chat_id || "",
     });
     setIsEditOpen(true);
   }
@@ -232,32 +219,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
       );
     } catch (err) {
       setTelegramMsg(`❌ ${err.message}`);
-    }
-  }
-
-  // ── Simulate Telegram Phone Submission ──────────────────────────────────────
-  async function handleSimulateSubmit(e) {
-    e.preventDefault();
-    const valErr = validateImageFile(simulateFile);
-    if (valErr) {
-      alert(valErr);
-      return;
-    }
-    setSimulating(true);
-    setSimulateResult(null);
-    try {
-      const res = await simulateTelegramUpload(
-        simulateSiteId,
-        simulateFile,
-        simulateSender,
-        simulateCaption
-      );
-      setSimulateResult(res);
-      await loadData();
-    } catch (err) {
-      alert("Upload failed: " + err.message);
-    } finally {
-      setSimulating(false);
     }
   }
 
@@ -370,17 +331,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                   ● Connected
                 </span>
               )}
-            </button>
-
-            <button
-              className="btn-engineer-action primary"
-              onClick={() => {
-                setSimulateSiteId(sites[0]?.id || "site-1");
-                setIsSimulateOpen(true);
-              }}
-              title="Test sending a photo as a worker on phone"
-            >
-              <span>🚀</span> Test Phone Photo (Telegram)
             </button>
           </div>
         </div>
@@ -532,10 +482,10 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                       {risk === "none"
                         ? "Awaiting Photo"
                         : risk === "low"
-                        ? "🟢 Safe / Low Risk"
-                        : risk === "medium"
-                        ? "🟡 Medium Caution"
-                        : "🔴 High Danger"}
+                          ? "🟢 Safe / Low Risk"
+                          : risk === "medium"
+                            ? "🟡 Medium Caution"
+                            : "🔴 High Danger"}
                     </span>
                     <span style={{ fontSize: "11px", color: "#738078" }}>
                       PPE: <b>{(site.ppe_compliance || "pending").toUpperCase()}</b>
@@ -567,34 +517,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                       Awaiting first photo upload to run safety inspection.
                     </div>
                   )}
-
-                  {/* Telegram Group Link Status */}
-                  <div
-                    className={`tg-group-status ${
-                      site.telegram_chat_id ? "" : "unlinked"
-                    }`}
-                  >
-                    <span>
-                      💬 <b>Telegram:</b>{" "}
-                      {site.telegram_chat_id
-                        ? "Group Connected"
-                        : "Group not linked yet"}
-                    </span>
-                    {!site.telegram_chat_id && (
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          color: "#18794e",
-                          fontWeight: "600",
-                          cursor: "pointer",
-                        }}
-                        onClick={() => openEditModal(site)}
-                        title="Link your Telegram group"
-                      >
-                        Link Group ↗
-                      </span>
-                    )}
-                  </div>
                 </div>
 
                 {/* Card Footer Actions */}
@@ -666,15 +588,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
             <div style={{ display: "flex", gap: "10px" }}>
               <button
                 className="btn-engineer-action primary"
-                onClick={() => {
-                  setSimulateSiteId(activeSiteId);
-                  setIsSimulateOpen(true);
-                }}
-              >
-                📱 Send Photo via Telegram
-              </button>
-              <button
-                className="btn-engineer-action"
                 onClick={() => {
                   setUploadSiteId(activeSiteId);
                   setIsUploadOpen(true);
@@ -821,8 +734,8 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                     standaloneResult.overall_risk_level === "low"
                       ? "#f0fdf4"
                       : standaloneResult.overall_risk_level === "medium"
-                      ? "#fffbeb"
-                      : "#fff1f2",
+                        ? "#fffbeb"
+                        : "#fff1f2",
                 }}
               >
                 <span
@@ -832,8 +745,8 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                       standaloneResult.overall_risk_level === "low"
                         ? "#16a34a"
                         : standaloneResult.overall_risk_level === "medium"
-                        ? "#d97706"
-                        : "#dc2626",
+                          ? "#d97706"
+                          : "#dc2626",
                   }}
                 >
                   {standaloneResult.overall_risk_level?.toUpperCase()} RISK
@@ -919,22 +832,6 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                     }
                     placeholder="e.g. Rajesh Kumar (Foreman)"
                   />
-                </div>
-
-                <div className="form-group">
-                  <label>Telegram Group / Chat ID</label>
-                  <input
-                    type="text"
-                    value={editForm.telegram_chat_id}
-                    onChange={(e) =>
-                      setEditForm((f) => ({ ...f, telegram_chat_id: e.target.value }))
-                    }
-                    placeholder="e.g. -1001982736451"
-                  />
-                  <span style={{ fontSize: "11px", color: "#738078" }}>
-                    💡 <b>Easiest Way:</b> Create a Telegram group for this site on your phone, add your bot, and type{" "}
-                    <code className="code-pill">/bind {editingSite.id.replace("site-", "")}</code> in that group!
-                  </span>
                 </div>
 
                 <div
@@ -1078,12 +975,12 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
             <div className="modal-body">
               <p style={{ margin: 0, fontSize: "13px", color: "#55695e" }}>
                 How many construction sites are currently under your supervision?
-                We will set up clean screens for each site where photos can be monitored.
+                Applying will initialize a fresh setup (resetting previous site photo records) while keeping your Telegram connection active.
               </p>
 
               <form onSubmit={handleApplySiteCount} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 <div className="form-group">
-                  <label>Number of Sites (1 to 20):</label>
+                  <label>Number of Sites (1 to 15):</label>
                   <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                     <input
                       type="range"
@@ -1204,128 +1101,7 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════
-         MODAL 5: TEST PHONE PHOTO SIMULATOR
-         ══════════════════════════════════════════════════════════════════════ */}
-      {isSimulateOpen && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>🚀 Test Labour Phone Photo (Telegram Simulator)</h3>
-              <button
-                className="modal-close-btn"
-                onClick={() => {
-                  setIsSimulateOpen(false);
-                  setSimulateResult(null);
-                  setSimulateFile(null);
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="modal-body">
-              <p style={{ margin: 0, fontSize: "13px", color: "#55695e" }}>
-                Test what happens when a worker on site sends a photo into the site's Telegram group from their smartphone!
-              </p>
-
-              <form onSubmit={handleSimulateSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div className="form-group">
-                  <label>Select Site's Telegram Group</label>
-                  <select
-                    value={simulateSiteId}
-                    onChange={(e) => setSimulateSiteId(e.target.value)}
-                  >
-                    {sites.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Worker Name</label>
-                    <input
-                      type="text"
-                      value={simulateSender}
-                      onChange={(e) => setSimulateSender(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Message / Observation</label>
-                    <input
-                      type="text"
-                      value={simulateCaption}
-                      onChange={(e) => setSimulateCaption(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label>Snap / Choose Photo</label>
-                  <ImageUploader
-                    file={simulateFile}
-                    onChange={(f) => setSimulateFile(f)}
-                  />
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                  <button
-                    type="button"
-                    className="btn-card-action"
-                    onClick={() => {
-                      setIsSimulateOpen(false);
-                      setSimulateResult(null);
-                      setSimulateFile(null);
-                    }}
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={simulating || !simulateFile}
-                  >
-                    {simulating ? <><Spinner /> Sending & Checking...</> : "Send in Site Telegram Group ✈️"}
-                  </button>
-                </div>
-              </form>
-
-              {simulateResult && (
-                <div
-                  style={{
-                    background: "#f0fdf4",
-                    border: "1px solid #bbf7d0",
-                    borderRadius: "8px",
-                    padding: "14px",
-                    fontSize: "12px",
-                  }}
-                >
-                  <b style={{ color: "#166534" }}>
-                    ✅ Photo received in {simulateResult.site_name} Telegram group!
-                  </b>
-                  <div
-                    style={{
-                      background: "#ffffff",
-                      padding: "10px",
-                      borderRadius: "6px",
-                      marginTop: "8px",
-                      border: "1px solid #e5ebe6",
-                      whiteSpace: "pre-wrap",
-                      color: "#17251f",
-                    }}
-                  >
-                    {simulateResult.bot_reply}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-         MODAL 6: DIRECT PHOTO UPLOAD
+         MODAL 5: DIRECT PHOTO UPLOAD
          ══════════════════════════════════════════════════════════════════════ */}
       {isUploadOpen && (
         <div className="modal-backdrop">

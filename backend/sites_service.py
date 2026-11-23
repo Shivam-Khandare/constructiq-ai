@@ -148,7 +148,7 @@ def get_site_by_telegram_chat(chat_id: str | int) -> dict[str, Any] | None:
 
 def create_or_setup_sites(count: int, site_names: list[str] | None = None) -> list[dict[str, Any]]:
     """Configures the exact number of sites requested by the civil engineer.
-    Preserves existing telegram_chat_id bindings and photo data."""
+    Clears older photos/data and initializes as a fresh setup while preserving telegram bindings."""
     effective_count = max(1, min(count, 30))
 
     # Load existing sites so we can preserve telegram bindings
@@ -156,6 +156,21 @@ def create_or_setup_sites(count: int, site_names: list[str] | None = None) -> li
     existing_map: dict[str, dict[str, Any]] = {
         s["id"]: s for s in existing_db.get("sites", [])
     }
+
+    # Clean up any photo files for sites beyond effective_count to prevent zombie records
+    for s in existing_db.get("sites", []):
+        sid = s["id"]
+        try:
+            s_num = int(sid.replace("site-", ""))
+            if s_num > effective_count:
+                pf = get_site_photos_file(sid)
+                if pf.exists():
+                    try:
+                        pf.unlink()
+                    except Exception as e:
+                        logger.warning("Could not unlink %s: %s", pf, e)
+        except ValueError:
+            pass
 
     sites = []
     for idx in range(effective_count):
@@ -171,16 +186,8 @@ def create_or_setup_sites(count: int, site_names: list[str] | None = None) -> li
         existing = existing_map.get(site_id, {})
         existing_chat_id = existing.get("telegram_chat_id", "")
 
-        # Check existing photos
-        if site_id not in existing_map:
-            _write_site_photos(site_id, [])
-            existing_photos = []
-            latest = None
-            analysis = {}
-        else:
-            existing_photos = _read_site_photos(site_id)
-            latest = existing_photos[-1] if existing_photos else None
-            analysis = latest.get("safety_analysis", {}) if latest else {}
+        # Always clear older photos for a fresh setup upon changing site count
+        _write_site_photos(site_id, [])
 
         site_record = {
             "id": site_id,
@@ -190,11 +197,11 @@ def create_or_setup_sites(count: int, site_names: list[str] | None = None) -> li
             "telegram_chat_id": existing_chat_id,  # ← PRESERVED
             "telegram_tag": f"site{num}",
             "created_at": existing.get("created_at", datetime.now(timezone.utc).isoformat()),
-            "status": existing.get("status", "active"),
-            "overall_risk": analysis.get("overall_risk_level", existing.get("overall_risk", "none")),
-            "ppe_compliance": analysis.get("ppe_compliance", existing.get("ppe_compliance", "pending")),
-            "photo_count": len(existing_photos),
-            "latest_photo": latest,
+            "status": "active",
+            "overall_risk": "none",
+            "ppe_compliance": "pending",
+            "photo_count": 0,
+            "latest_photo": None,
         }
         sites.append(site_record)
 

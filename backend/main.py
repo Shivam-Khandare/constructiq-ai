@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 from pathlib import Path
+import re
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -274,7 +275,13 @@ async def _call_gemini(system: str, prompt: str,
 
     # Model fallback chain: try preferred model, then proven vision models
     models_to_try = [settings.gemini_model]
-    for alt in ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-3.5-flash-lite"]:
+    for alt in [
+        "gemini-flash-lite-latest",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash-lite",
+    ]:
         if alt not in models_to_try:
             models_to_try.append(alt)
 
@@ -321,6 +328,33 @@ async def call_ai(system: str, prompt: str,
         return await _call_gemini(system, prompt, image_bytes, image_mime)
 
 
+def _format_to_lines(text: str, max_lines: int = 6, min_lines: int = 4) -> str:
+    """Formats safety feedback into 4 to 6 concise, highly readable lines."""
+    if not text:
+        return ""
+    # Check if text is already multi-line
+    raw_lines = [
+        line.strip().lstrip("•-*0123456789. ")
+        for line in str(text).splitlines()
+        if line.strip()
+    ]
+    if len(raw_lines) >= min_lines:
+        return "\n".join(f"• {line}" for line in raw_lines[:max_lines])
+
+    # If it is a long paragraph, break into sentences
+    sentences = re.split(r"(?<=[.!?])\s+", str(text).strip())
+    sentences = [
+        s.strip().lstrip("•-*0123456789. ")
+        for s in sentences
+        if len(s.strip()) > 5
+    ]
+    if len(sentences) >= min_lines:
+        return "\n".join(f"• {s}" for s in sentences[:max_lines])
+    elif len(sentences) > 0:
+        return "\n".join(f"• {s}" for s in sentences)
+    return str(text).strip()
+
+
 async def _safety_analyzer_bridge(
     image_bytes: bytes,
     context: str = "",
@@ -330,7 +364,7 @@ async def _safety_analyzer_bridge(
     system = """You are a senior civil engineer and certified construction safety auditor.
 Carefully examine the construction site photograph to identify actual hazards, structural defects, fall risks, trench/excavation dangers, electrical hazards, and PPE non-compliance.
 
-RISK LEVEL DEFINITIONS (assess strictly based on visible visual evidence):
+RISK LEVEL CLASSIFICATION (consistent and deterministic across all evaluations):
 • CRITICAL: Imminent life-threatening hazard requiring immediate work stoppage.
   - Workers at elevation (> 1.8m/6ft) or near open floor edges/scaffolding without any fall arrest harness or guardrails.
   - Workers inside deep trenches or excavations (> 1.2m/4ft) without shoring walls, trench shields, or sloped banks.
@@ -352,11 +386,21 @@ RISK LEVEL DEFINITIONS (assess strictly based on visible visual evidence):
   - Proper guardrails, safety netting, and warning barricades are installed where required.
   - No active or imminent hazards visible.
 
+STRICT OVERALL RISK CONSISTENCY RULE:
+• The 'overall_risk_level' must ALWAYS reflect the single highest hazard severity present in the image.
+• If ANY hazard is 'critical' (such as unprotected work at height, fall danger, or deep trenching), the 'overall_risk_level' MUST be 'critical', regardless of how many medium or compliant items exist. Never average risk levels.
+• If no critical hazards exist but ANY hazard is 'high', the 'overall_risk_level' MUST be 'high'.
+• Only assign 'medium' when the only issues are PPE violations (missing hard hat, vest) or housekeeping/tripping hazards.
+
+LENGTH & LINE CONSTRAINTS (MANDATORY):
+• 'what_is_the_risk': MUST be concise, strictly between 4 and 6 lines/bullet points. Plain, direct English describing what is wrong.
+• 'how_to_improve': MUST be concise, strictly between 4 and 6 lines/bullet points. Numbered action steps on how to fix it immediately.
+
 Return ONLY a valid JSON object with these exact keys:
 {
   "overall_risk_level": "critical" | "high" | "medium" | "low",
-  "what_is_the_risk": "Detailed, plain-language description of the specific hazard visible in the photo (or confirmation that the area is clean, compliant, and safe).",
-  "how_to_improve": "Clear, step-by-step practical action to resolve the risk immediately.",
+  "what_is_the_risk": "4 to 6 concise bullet points describing visible hazards.",
+  "how_to_improve": "4 to 6 concise numbered action steps to fix the hazards immediately.",
   "ppe_compliance": "compliant" | "partial" | "non-compliant" | "not-visible",
   "hazards": [
     {
@@ -378,11 +422,23 @@ Return ONLY a valid JSON object with these exact keys:
 
         # Normalize and validate overall_risk_level
         risk_raw = str(result.get("overall_risk_level", "low")).strip().lower()
-        if "crit" in risk_raw:
+
+        # Check hazard severities to guarantee consistency across all upload paths
+        hazard_severities = [
+            str(h.get("severity", "")).lower()
+            for h in result.get("hazards", [])
+            if isinstance(h, dict)
+        ]
+
+        has_critical = any("crit" in s for s in hazard_severities) or "crit" in risk_raw
+        has_high = any("high" in s for s in hazard_severities) or "high" in risk_raw
+        has_med = any("med" in s for s in hazard_severities) or "med" in risk_raw
+
+        if has_critical:
             risk = "critical"
-        elif "high" in risk_raw:
+        elif has_high:
             risk = "high"
-        elif "med" in risk_raw:
+        elif has_med:
             risk = "medium"
         elif any(w in risk_raw for w in ["low", "safe", "none", "ok"]):
             risk = "low"
@@ -399,6 +455,12 @@ Return ONLY a valid JSON object with these exact keys:
         if "immediate_actions" not in result or not result["immediate_actions"]:
             result["immediate_actions"] = [result.get("how_to_improve", "Continue safe operations.")]
 
+        # Format risk and improvement to be around 4-6 concise lines
+        if result.get("what_is_the_risk"):
+            result["what_is_the_risk"] = _format_to_lines(result["what_is_the_risk"], 6, 4)
+        if result.get("how_to_improve"):
+            result["how_to_improve"] = _format_to_lines(result["how_to_improve"], 6, 4)
+
         logger.info("Safety Analysis Complete: risk=%s, hazards=%d, ppe=%s",
                     result["overall_risk_level"], len(result.get("hazards", [])), result.get("ppe_compliance"))
         return result
@@ -408,8 +470,8 @@ Return ONLY a valid JSON object with these exact keys:
         if any(k in ctx for k in ["trench", "pit", "hole", "cave", "excavat", "mud", "soil"]):
             return {
                 "overall_risk_level": "critical",
-                "what_is_the_risk": "Deep open excavation or trench without shoring walls or barricades. High danger of soil collapse or worker fall.",
-                "how_to_improve": "Stop work inside the trench immediately. Install trench boxes/shoring and place warning barricades around perimeter.",
+                "what_is_the_risk": "• Deep open excavation or trench without shoring walls.\n• High danger of soil collapse or worker fall.\n• Missing perimeter barricades and warning signage.\n• Workers active near unreinforced trench edges.",
+                "how_to_improve": "• Stop all work inside the trench immediately.\n• Install trench boxes or hydraulic shoring along walls.\n• Place continuous warning barricades around perimeter.\n• Provide secure egress ladders every 25 feet.",
                 "ppe_compliance": "partial",
                 "summary": "Deep trench is open and unprotected. Immediate shoring and barricades required.",
                 "hazards": [{"type": "Trench Collapse", "severity": "critical", "location": "Excavation edge", "description": "Unshored trench", "recommendation": "Install trench shields"}],
@@ -417,19 +479,19 @@ Return ONLY a valid JSON object with these exact keys:
             }
         elif any(k in ctx for k in ["height", "scaffold", "fall", "roof", "beam", "edge"]):
             return {
-                "overall_risk_level": "high",
-                "what_is_the_risk": "Workers at height without safety harnesses or perimeter guardrails.",
-                "how_to_improve": "Put on full-body safety harnesses clipped to certified anchor lines. Erect sturdy guardrails.",
+                "overall_risk_level": "critical",
+                "what_is_the_risk": "• Workers operating at height without fall protection.\n• Missing perimeter guardrails and safety netting.\n• Workers standing on narrow temporary planks.\n• Imminent risk of serious or fatal fall.",
+                "how_to_improve": "• Halt all elevated work immediately.\n• Require 100% tie-off using full-body safety harnesses.\n• Erect certified top-rails, mid-rails, and toe-boards.\n• Inspect scaffolding planks before resuming work.",
                 "ppe_compliance": "partial",
                 "summary": "Fall hazard at height. Safety harnesses and guardrails are needed immediately.",
-                "hazards": [{"type": "Fall Hazard", "severity": "high", "location": "Elevated platform", "description": "No fall arrest gear", "recommendation": "Clip safety harnesses"}],
+                "hazards": [{"type": "Fall Hazard", "severity": "critical", "location": "Elevated platform", "description": "No fall arrest gear", "recommendation": "Clip safety harnesses"}],
                 "immediate_actions": ["Clip safety harness", "Install guardrails"]
             }
         elif any(k in ctx for k in ["helmet", "hat", "vest", "ppe"]):
             return {
                 "overall_risk_level": "medium",
-                "what_is_the_risk": "Personnel missing safety helmets or high-visibility reflective vests.",
-                "how_to_improve": "Enforce mandatory hard hats and reflective vests before anyone enters the active work area.",
+                "what_is_the_risk": "• Workers missing mandatory hard hats or safety helmets.\n• High-visibility reflective vests not visible on personnel.\n• Potential hazard from minor falling objects or low visibility.\n• Active zone entry without full basic PPE kit.",
+                "how_to_improve": "• Issue approved safety helmets to all site personnel.\n• Mandate high-visibility vests before active zone entry.\n• Conduct brief morning PPE compliance toolbox talk.\n• Appoint safety supervisor to monitor entrance gate.",
                 "ppe_compliance": "non-compliant",
                 "summary": "Missing PPE: hard hats or high-vis vests not observed.",
                 "hazards": [{"type": "PPE Violation", "severity": "medium", "location": "Active zone", "description": "Missing hard hats", "recommendation": "Issue safety helmets"}],
@@ -438,8 +500,8 @@ Return ONLY a valid JSON object with these exact keys:
         else:
             return {
                 "overall_risk_level": "medium",
-                "what_is_the_risk": "Safety check performed. Please verify workers are wearing hard hats, reflective vests, and that walkways remain clear.",
-                "how_to_improve": "Conduct a quick pre-shift toolbox talk, ensure all personnel wear required safety gear, and maintain clear walking paths.",
+                "what_is_the_risk": "• General site safety check completed.\n• Walkways require regular inspection for loose debris.\n• PPE compliance needs continuous site enforcement.\n• Material stacks must be verified for stability.",
+                "how_to_improve": "• Conduct daily morning toolbox safety talk.\n• Keep designated pedestrian walkways unobstructed.\n• Verify all personnel wear hard hats and safety boots.\n• Inspect active zones periodically throughout the shift.",
                 "ppe_compliance": "partial",
                 "summary": "Safety check completed. Standard precautions recommended.",
                 "hazards": [],

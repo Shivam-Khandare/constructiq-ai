@@ -1199,15 +1199,21 @@
 
 .plain-risk-desc {
   color: #3d5244;
+  white-space: pre-line;
+  line-height: 1.45;
 }
 
 .plain-risk-box.alert .plain-risk-desc {
   color: #991b1b;
+  white-space: pre-line;
+  line-height: 1.45;
 }
 
 .plain-improve-desc {
   color: #15803d;
   font-weight: 500;
+  white-space: pre-line;
+  line-height: 1.45;
 }
 
 /* Telegram Group Status Pill */

@@ -990,14 +990,18 @@ class TelegramService:
             }
         elif any(w in ctx_lower for w in ["height", "fall", "scaffold", "ladder", "edge", "slab", "roof"]):
             return {
-                "overall_risk_level": "high",
+                "overall_risk_level": "critical",
                 "what_is_the_risk": (
-                    "Workers are working at height without safety harnesses "
-                    "or guardrails on the platform edge."
+                    "• Workers operating at height without full fall arrest systems.\n"
+                    "• Missing perimeter guardrails, mid-rails, or safety netting.\n"
+                    "• Workers standing on narrow temporary supports.\n"
+                    "• Imminent high risk of a serious or fatal fall."
                 ),
                 "how_to_improve": (
-                    "Put on full-body safety harnesses and clip them to secure "
-                    "anchor points. Install sturdy guardrails along the edge."
+                    "• Halt all work at height immediately.\n"
+                    "• Require full-body harnesses tied off to certified anchor points.\n"
+                    "• Erect sturdy top-rails, mid-rails, and toe-boards along platform edge.\n"
+                    "• Provide stable scaffolding platforms before resuming work."
                 ),
                 "ppe_compliance": "partial",
                 "summary": "Fall danger at high elevation. Safety harnesses must be worn and clipped.",
