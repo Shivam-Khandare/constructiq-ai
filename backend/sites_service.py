@@ -269,6 +269,12 @@ def delete_site(site_id: str) -> bool:
                 pf.unlink()
             except Exception as e:
                 logger.warning("Could not delete photo file %s: %s", pf, e)
+        rf = get_site_reports_file(site_id)
+        if rf.exists():
+            try:
+                rf.unlink()
+            except Exception as e:
+                logger.warning("Could not delete reports file %s: %s", rf, e)
         return True
     return False
 
@@ -326,3 +332,63 @@ def add_site_photo(
 
     logger.info("Added photo to %s (%s). Risk=%s", site_id, site.get("name", site_id), risk)
     return photo_record
+
+
+# ── Daily Progress Reports Storage ───────────────────────────────────────────
+
+def get_site_reports_file(site_id: str) -> Path:
+    return DATA_DIR / f"reports_{site_id}.json"
+
+
+def _read_site_reports(site_id: str) -> list[dict[str, Any]]:
+    path = get_site_reports_file(site_id)
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error("Failed to read reports for %s: %s", site_id, e)
+        return []
+
+
+def _write_site_reports(site_id: str, reports: list[dict[str, Any]]) -> None:
+    path = get_site_reports_file(site_id)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(reports, f, indent=2)
+    except Exception as e:
+        logger.error("Failed to write reports for %s: %s", site_id, e)
+
+
+def save_site_report(site_id: str, report_data: dict[str, Any]) -> dict[str, Any]:
+    """Stores a generated daily progress report under the site's history."""
+    reports = _read_site_reports(site_id)
+    record = {
+        "id": f"report-{uuid.uuid4().hex[:8]}",
+        "site_id": site_id,
+        "site_name": report_data.get("site_name", site_id),
+        "date": report_data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "overall_progress": report_data.get("overall_progress", "on-schedule"),
+        "summary": report_data.get("summary", ""),
+        "sections": report_data.get("sections", []),
+        "issues_flagged": report_data.get("issues_flagged", []),
+        "next_day_plan": report_data.get("next_day_plan", ""),
+        "submitted_by": report_data.get("submitted_by", "Field Personnel"),
+    }
+    reports.insert(0, record)  # Newest first
+    _write_site_reports(site_id, reports)
+    logger.info("Saved daily site report for %s (%s)", site_id, record["date"])
+    return record
+
+
+def get_all_site_reports(site_id: str | None = None) -> list[dict[str, Any]]:
+    """Retrieves all site reports or reports for a specific site."""
+    if site_id:
+        return _read_site_reports(site_id)
+    all_reports = []
+    for s in get_all_sites():
+        all_reports.extend(_read_site_reports(s["id"]))
+    all_reports.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return all_reports

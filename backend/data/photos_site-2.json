@@ -1,1 +1,53 @@
-[]
+[
+  {
+    "id": "photo-f101d01f",
+    "site_id": "site-2",
+    "filename": "site-2_841129817c.jpg",
+    "url": "/api/sites/site-2/images/site-2_841129817c.jpg",
+    "timestamp": "2026-11-23T18:23:50.795186+00:00",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Photo sent from phone via Telegram",
+    "safety_analysis": {
+      "overall_risk_level": "critical",
+      "what_is_the_risk": "• Multiple workers are operating at extreme heights on scaffolding without any fall arrest harnesses or safety lines.\n• The scaffolding structure is incomplete, lacking essential guardrails, toe-boards, and stable, fully-planked working platforms.\n• Total absence of Personal Protective Equipment (PPE) such as hard hats, safety boots, and high-visibility vests for all personnel.\n• Significant risk of falling objects due to loose materials on narrow, unprotected scaffold planks and poor housekeeping at the base.\n• Workers are using makeshift access methods on an unstable-looking scaffold system that lacks proper structural bracing.",
+      "how_to_improve": "• Immediately stop all work at height and evacuate workers from the scaffolding until it is brought up to safety standards.\n• Install a certified scaffolding system that includes full perimeter guardrails, mid-rails, toe-boards, and secure access ladders.\n• Provide and mandate the use of fall arrest systems, including full-body harnesses and secure anchorage points for all elevated work.\n• Implement a mandatory PPE policy requiring hard hats, safety boots, and high-visibility vests for every person entering the site.\n• Conduct a comprehensive site safety induction and daily toolbox talks to educate workers on fall protection and hazard recognition.",
+      "ppe_compliance": "non-compliant",
+      "hazards": [
+        {
+          "type": "Fall Risk",
+          "severity": "critical",
+          "location": "Upper levels of the scaffolding structure",
+          "description": "Workers are standing on narrow planks at multiple stories high without guardrails or safety harnesses.",
+          "recommendation": "Install full guardrail systems and provide fall arrest equipment immediately."
+        },
+        {
+          "type": "PPE Violation",
+          "severity": "medium",
+          "location": "Entire construction site",
+          "description": "Workers are wearing casual clothing and footwear with no hard hats or safety vests visible.",
+          "recommendation": "Enforce mandatory use of hard hats, safety boots, and high-visibility vests."
+        },
+        {
+          "type": "Housekeeping",
+          "severity": "medium",
+          "location": "Ground level at the base of the building",
+          "description": "Accumulated construction debris and timber create tripping hazards and indicate poor site management.",
+          "recommendation": "Clear all debris and establish designated material storage areas."
+        },
+        {
+          "type": "Structural",
+          "severity": "high",
+          "location": "Scaffolding assembly",
+          "description": "The scaffolding appears makeshift and lacks visible cross-bracing or secure ties to the building structure.",
+          "recommendation": "Have a qualified engineer inspect and certify the scaffolding before any further use."
+        }
+      ],
+      "immediate_actions": [
+        "Issue an immediate 'Stop Work' order for all activities on the scaffolding.",
+        "Evacuate all workers from elevated platforms to ground level safely.",
+        "Barricade the area around the scaffolding to prevent access until safety improvements are verified."
+      ],
+      "summary": "The site is in a critical state of non-compliance, with workers facing imminent life-threatening fall hazards from substandard scaffolding without any protection. A total lack of PPE and poor site housekeeping further exacerbate the high risk of severe injury or fatality."
+    }
+  }
+]

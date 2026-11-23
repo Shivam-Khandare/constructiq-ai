@@ -25,6 +25,55 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
   const [filterRisk, setFilterRisk] = useState("all");
   const [telegramStatus, setTelegramStatus] = useState(null);
 
+  // ── Access Control (Lead Civil Engineer Authorization) ─────────────────────
+  const [isAdmin, setIsAdmin] = useState(
+    () => sessionStorage.getItem("cq_lead_engineer") === "true"
+  );
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [adminPinInput, setAdminPinInput] = useState("");
+  const [adminPinError, setAdminPinError] = useState("");
+  const [pendingAction, setPendingAction] = useState(null);
+
+  function requireAdmin(actionFn) {
+    if (isAdmin) {
+      actionFn();
+    } else {
+      setPendingAction(() => actionFn);
+      setAdminPinInput("");
+      setAdminPinError("");
+      setIsAdminModalOpen(true);
+    }
+  }
+
+  function handleUnlockAdmin(e) {
+    e.preventDefault();
+    const pin = adminPinInput.trim();
+    if (!pin) {
+      setAdminPinError("Please enter your Lead Engineer PIN.");
+      return;
+    }
+    if (pin !== "1234") {
+      setAdminPinError("Incorrect Lead Engineer PIN. Default is 1234.");
+      return;
+    }
+    sessionStorage.setItem("cq_lead_engineer", "true");
+    sessionStorage.setItem("cq_admin_pin", pin);
+    setIsAdmin(true);
+    setIsAdminModalOpen(false);
+    setAdminPinError("");
+    if (pendingAction) {
+      const fn = pendingAction;
+      setPendingAction(null);
+      fn();
+    }
+  }
+
+  function handleLockAdmin() {
+    sessionStorage.removeItem("cq_lead_engineer");
+    sessionStorage.removeItem("cq_admin_pin");
+    setIsAdmin(false);
+  }
+
   // ── Modals ──────────────────────────────────────────────────────────────────
   // 1. Setup site count modal
   const [isSetupOpen, setIsSetupOpen] = useState(false);
@@ -301,21 +350,36 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
           </div>
 
           <div className="hub-banner-actions">
+            {/* Lead Civil Engineer Authorization Mode Status */}
+            <button
+              className={`btn-lead-mode ${isAdmin ? "unlocked" : "locked"}`}
+              onClick={isAdmin ? handleLockAdmin : () => requireAdmin(() => {})}
+              title={
+                isAdmin
+                  ? "Lead Civil Engineer Mode is Active (Modifications Allowed). Click to Lock."
+                  : "Field Worker Mode (Protected). Click to Enter Lead Engineer PIN."
+              }
+            >
+              {isAdmin ? "🟢 Lead Engineer Mode [🔒 Lock]" : "🔒 Field Worker Mode [Unlock Admin]"}
+            </button>
+
             <button
               className="btn-engineer-action"
               onClick={() => {
-                setTargetSiteCount(sites.length || 5);
-                setIsSetupOpen(true);
+                requireAdmin(() => {
+                  setTargetSiteCount(sites.length || 5);
+                  setIsSetupOpen(true);
+                });
               }}
-              title="Set how many sites are under you"
+              title="Set how many sites are under you (Requires Lead Engineer Access)"
             >
               <span>⚙️</span> Sites: {sites.length} Active
             </button>
 
             <button
               className="btn-engineer-action"
-              onClick={() => setIsAddOpen(true)}
-              title="Add a new site"
+              onClick={() => requireAdmin(() => setIsAddOpen(true))}
+              title="Add a new site (Requires Lead Engineer Access)"
             >
               <span>➕</span> Add Site
             </button>
@@ -428,8 +492,8 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                   </div>
                   <button
                     className="btn-edit-site"
-                    onClick={() => openEditModal(site)}
-                    title="Edit site name, location, or Telegram group"
+                    onClick={() => requireAdmin(() => openEditModal(site))}
+                    title="Edit site details (Requires Lead Civil Engineer PIN)"
                   >
                     ✏️ Edit
                   </button>
@@ -844,7 +908,7 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                 >
                   <button
                     type="button"
-                    onClick={() => handleDeleteSite(editingSite.id)}
+                    onClick={() => requireAdmin(() => handleDeleteSite(editingSite.id))}
                     style={{
                       background: "transparent",
                       border: "1px solid #fecdd3",
@@ -1166,6 +1230,108 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                     disabled={uploading || !uploadFile}
                   >
                     {uploading ? <><Spinner /> Uploading...</> : "Upload & Analyze"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+         MODAL 6: LEAD CIVIL ENGINEER PIN AUTHORIZATION
+         ══════════════════════════════════════════════════════════════════════ */}
+      {isAdminModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsAdminModalOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "440px" }}>
+            <div className="modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "20px" }}>🛡️</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "15px", color: "#17251f" }}>
+                    Lead Civil Engineer Authorization
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#738078" }}>
+                    Only 1 authorized person can edit or delete monitored sites.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setIsAdminModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <form onSubmit={handleUnlockAdmin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <div
+                  style={{
+                    background: "#f0fdf4",
+                    border: "1px solid #bbf7d0",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    fontSize: "12px",
+                    color: "#166534",
+                    lineHeight: "1.45",
+                  }}
+                >
+                  💡 <b>Open Access:</b> Quick Single Photo Check remains 100% accessible to all workers and visitors without any password. Modifying monitored sites or active counts requires authorization.
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#17251f" }}>
+                    Lead Engineer Master PIN *
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter PIN (Default: 1234)"
+                    value={adminPinInput}
+                    onChange={(e) => {
+                      setAdminPinInput(e.target.value);
+                      setAdminPinError("");
+                    }}
+                    autoFocus
+                    required
+                    style={{
+                      padding: "10px 12px",
+                      fontSize: "14px",
+                      letterSpacing: "3px",
+                      borderRadius: "8px",
+                      border: adminPinError ? "1px solid #ef4444" : "1px solid #d1dbd3",
+                    }}
+                  />
+                  <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#738078" }}>
+                    Default Passcode: <code>1234</code>
+                  </p>
+                </div>
+
+                {adminPinError && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      background: "#fef2f2",
+                      border: "1px solid #fecdd3",
+                      borderRadius: "6px",
+                      color: "#b91c1c",
+                      fontSize: "12px",
+                    }}
+                  >
+                    ⚠️ {adminPinError}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
+                  <button
+                    type="button"
+                    className="btn-card-action"
+                    onClick={() => setIsAdminModalOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" style={{ minWidth: "130px" }}>
+                    🔓 Unlock Access
                   </button>
                 </div>
               </form>

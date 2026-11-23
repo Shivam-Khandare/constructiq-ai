@@ -8,8 +8,17 @@ const API_BASE_URL = RAW_API_URL.replace(/\/+$/, "");
 
 async function request(endpoint, options = {}) {
   let response;
+  const headers = { ...(options.headers || {}) };
+  const adminPin =
+    sessionStorage.getItem("cq_admin_pin") ||
+    (sessionStorage.getItem("cq_lead_engineer") === "true" ? "1234" : null);
+  if (adminPin && !headers["X-Admin-PIN"] && !headers["x-admin-pin"]) {
+    headers["X-Admin-PIN"] = adminPin;
+  }
+  const fetchOptions = { ...options, headers };
+
   try {
-    response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+    response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
   } catch {
     throw new Error(
       "Cannot reach the backend. Make sure the FastAPI server is running on port 8000."
@@ -168,10 +177,26 @@ export function getWeatherAdvisory(fields) {
 
 export function generateReport(fields, imageFile = null) {
   const form = new FormData();
-  Object.entries(fields).forEach(([k, v]) => form.append(k, v));
+  Object.entries(fields).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) form.append(k, v);
+  });
   if (imageFile) form.append("file", imageFile);
   return request("/api/reports/generate", { method: "POST", body: form });
 }
+
+export const getSiteReports = (siteId = "") =>
+  request(
+    siteId
+      ? `/api/reports/history?site_id=${encodeURIComponent(siteId)}`
+      : "/api/reports/history"
+  );
+
+export const broadcastReportToTelegram = (siteId, report) =>
+  request("/api/reports/broadcast-telegram", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ site_id: siteId, report }),
+  });
 
 // ── 7. AI Construction Assistant ──────────────────────────────────────────────
 

@@ -1216,6 +1216,80 @@
   line-height: 1.45;
 }
 
+/* ── Screen Card Compact Hierarchy (Smaller Risk & Fix Font on Grid) ── */
+.screen-card .plain-risk-box {
+  padding: 6px 9px;
+  gap: 4px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  border-radius: 6px;
+}
+
+.screen-card .plain-risk-label {
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.screen-card .plain-risk-desc,
+.screen-card .plain-improve-desc {
+  font-size: 10px;
+  line-height: 1.32;
+}
+
+/* ── Album Feed Spacious Hierarchy (Detailed, Larger Text for Album View) ── */
+.album-feed .plain-risk-box {
+  padding: 12px 16px;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  border-radius: 8px;
+}
+
+.album-feed .plain-risk-label {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.album-feed .plain-risk-desc,
+.album-feed .plain-improve-desc {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── Lead Civil Engineer Mode Status Pill ── */
+.btn-lead-mode {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.btn-lead-mode.unlocked {
+  background: #f0fdf4;
+  color: #15803d;
+  border-color: #86efac;
+}
+
+.btn-lead-mode.unlocked:hover {
+  background: #dcfce7;
+}
+
+.btn-lead-mode.locked {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.btn-lead-mode.locked:hover {
+  background: #fef3c7;
+}
+
 /* Telegram Group Status Pill */
 .tg-group-status {
   display: flex;

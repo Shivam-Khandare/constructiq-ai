@@ -29,9 +29,11 @@ from sites_service import (
     create_or_setup_sites,
     create_single_site,
     delete_site,
+    get_all_site_reports,
     get_all_sites,
     get_site,
     initialize_clean_sites,
+    save_site_report,
     update_site,
     _read_site_photos,
 )
@@ -49,6 +51,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    admin_pin: str = "1234"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     app_reload: bool = False
@@ -144,6 +147,7 @@ async def on_startup() -> None:
 
     # Wire up Telegram bot integration service
     telegram_service.set_analyzer(_safety_analyzer_bridge)
+    telegram_service.set_report_generator(_report_generator_bridge)
     active_token = settings.telegram_bot_token or telegram_service.token
     if active_token:
         try:
@@ -509,6 +513,63 @@ Return ONLY a valid JSON object with these exact keys:
             }
 
 
+async def _report_generator_bridge(
+    site_name: str,
+    date: str,
+    raw_notes: str,
+    sender: str = "",
+) -> dict[str, Any]:
+    """Generates a structured daily site report from field worker or telegram notes."""
+    system = """You are a senior civil construction project manager generating a professional structured daily site report.
+Parse the raw field notes from the supervisor or worker and generate a complete formal report.
+Return ONLY a valid JSON object matching this schema:
+{
+  "date": "YYYY-MM-DD",
+  "site_name": "Site Name",
+  "overall_progress": "behind-schedule or on-schedule or ahead-of-schedule",
+  "sections": [
+    {"section": "Work Completed", "content": "Key activities and progress achieved"},
+    {"section": "Workforce & Labor", "content": "Workers count, trades involved"},
+    {"section": "Equipment & Materials", "content": "Machinery deployed and materials consumed"},
+    {"section": "Safety & Site Conditions", "content": "Safety measures observed and weather"}
+  ],
+  "issues_flagged": ["Specific issue or delay if any"],
+  "next_day_plan": "Specific goals for tomorrow",
+  "summary": "1-2 sentence executive summary of today's progress"
+}
+Return ONLY the JSON object."""
+    prompt = f"Generate daily site progress report:\nSite: {site_name}\nDate: {date}\nSubmitted by: {sender or 'Field Worker'}\nField Notes: {raw_notes}"
+    try:
+        result = await call_ai(system, prompt)
+        result.setdefault("date", date)
+        result.setdefault("site_name", site_name)
+        result.setdefault("overall_progress", "on-schedule")
+        result.setdefault("sections", [
+            {"section": "Work Completed", "content": raw_notes[:300]},
+            {"section": "Workforce & Labor", "content": f"Field team logged by {sender or 'Site Team'}."},
+            {"section": "Safety & Site Conditions", "content": "Standard site safety protocols observed."}
+        ])
+        result.setdefault("issues_flagged", [])
+        result.setdefault("next_day_plan", "Continue scheduled works tomorrow.")
+        result.setdefault("summary", f"Daily report recorded for {site_name}.")
+        return result
+    except Exception as e:
+        logger.warning("AI daily report generator error: %s. Using structured fallback.", e)
+        return {
+            "date": date,
+            "site_name": site_name,
+            "overall_progress": "on-schedule",
+            "sections": [
+                {"section": "Work Completed", "content": raw_notes},
+                {"section": "Workforce & Labor", "content": f"Logged by {sender or 'Field Personnel'}."},
+                {"section": "Safety & Site Conditions", "content": "Routine daily operations."}
+            ],
+            "issues_flagged": [],
+            "next_day_plan": "Continue next shift activities according to schedule.",
+            "summary": raw_notes[:200]
+        }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  IMAGE VALIDATION
 # ══════════════════════════════════════════════════════════════════════════════
@@ -690,6 +751,13 @@ class DailyReportResponse(BaseModel):
     issues_flagged: list[str]
     next_day_plan: str
     summary: str
+    site_id: str | None = None
+    submitted_by: str | None = None
+
+
+class ReportBroadcastRequest(BaseModel):
+    site_id: str
+    report: dict[str, Any]
 
 
 class AssistantResponse(BaseModel):
@@ -781,6 +849,17 @@ async def analyze_safety(file: UploadFile = File(...), context: str = Form(defau
 
 # ── Multi-Site Management & Field Album Feeds ─────────────────────────────────
 
+def _verify_admin_pin(req: Request) -> None:
+    """Verifies that the caller has Lead Civil Engineer authorization."""
+    expected_pin = getattr(settings, "admin_pin", "1234")
+    pin = req.headers.get("x-admin-pin") or req.query_params.get("pin")
+    if expected_pin and pin != expected_pin:
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized: Lead Civil Engineer authorization required to modify or delete monitored sites.",
+        )
+
+
 @app.get("/api/sites")
 def list_sites():
     """Lists all monitored construction sites with current risk metrics."""
@@ -788,15 +867,17 @@ def list_sites():
 
 
 @app.post("/api/sites/setup")
-def setup_sites_endpoint(req: SiteSetupRequest):
-    """Configures N sites under the engineer's supervision."""
+def setup_sites_endpoint(req: SiteSetupRequest, request: Request):
+    """Configures N sites under the engineer's supervision (Requires Lead Engineer PIN)."""
+    _verify_admin_pin(request)
     sites = create_or_setup_sites(req.count, req.names)
     return {"sites": sites, "count": len(sites)}
 
 
 @app.post("/api/sites")
-def create_site_endpoint(req: SiteCreateRequest):
-    """Creates a new site under monitoring."""
+def create_site_endpoint(req: SiteCreateRequest, request: Request):
+    """Creates a new site under monitoring (Requires Lead Engineer PIN)."""
+    _verify_admin_pin(request)
     new_site = create_single_site(
         name=req.name,
         location=req.location,
@@ -815,7 +896,9 @@ def get_site_endpoint(site_id: str):
 
 
 @app.put("/api/sites/{site_id}")
-def update_site_endpoint(site_id: str, req: SiteUpdateRequest):
+def update_site_endpoint(site_id: str, req: SiteUpdateRequest, request: Request):
+    """Updates site configuration (Requires Lead Engineer PIN)."""
+    _verify_admin_pin(request)
     update_data = {k: v for k, v in req.model_dump().items() if v is not None}
     updated = update_site(site_id, update_data)
     if not updated:
@@ -824,8 +907,9 @@ def update_site_endpoint(site_id: str, req: SiteUpdateRequest):
 
 
 @app.delete("/api/sites/{site_id}")
-def delete_site_endpoint(site_id: str):
-    """Removes a site from monitoring."""
+def delete_site_endpoint(site_id: str, request: Request):
+    """Removes a site from monitoring (Requires Lead Engineer PIN)."""
+    _verify_admin_pin(request)
     success = delete_site(site_id)
     if not success:
         raise HTTPException(status_code=404, detail="Site not found.")
@@ -1091,6 +1175,7 @@ Return ONLY the JSON object."""
 @app.post("/api/reports/generate", response_model=DailyReportResponse)
 async def generate_report(
     site_name: str = Form(...), date: str = Form(...),
+    site_id: str = Form(default=""),
     file: UploadFile = File(default=None),
     activities_completed: str = Form(default=""),
     workers_present: int = Form(default=0),
@@ -1132,7 +1217,75 @@ Return ONLY the JSON object."""
     result.setdefault("issues_flagged", [])
     result.setdefault("next_day_plan", "Continue scheduled activities.")
     result.setdefault("summary", "Report generated.")
+
+    # Associate with site and persist to site report records
+    target_site_id = site_id.strip() if site_id else ""
+    if not target_site_id:
+        for s in get_all_sites():
+            if s.get("name", "").strip().lower() == site_name.strip().lower():
+                target_site_id = s["id"]
+                break
+
+    if target_site_id:
+        result["site_id"] = target_site_id
+        result["submitted_by"] = "💻 Web Portal: Civil Engineer"
+        save_site_report(target_site_id, result)
+    else:
+        result["submitted_by"] = "💻 Web Portal: Civil Engineer"
+
     return result
+
+
+@app.get("/api/reports/history")
+def get_reports_history_endpoint(site_id: str = ""):
+    """Returns past daily site reports, optionally filtered by site_id."""
+    reports = get_all_site_reports(site_id.strip() if site_id else None)
+    return {"reports": reports, "count": len(reports)}
+
+
+@app.post("/api/reports/broadcast-telegram")
+async def broadcast_report_endpoint(req: ReportBroadcastRequest):
+    """Broadcasts a formal daily site report to the site's connected Telegram group."""
+    site = get_site(req.site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found.")
+    chat_id = site.get("telegram_chat_id")
+    if not chat_id:
+        raise HTTPException(
+            status_code=400,
+            detail="This site is not currently linked to a Telegram group. Tap a site button in your Telegram group first.",
+        )
+
+    rep = req.report
+    status_label = str(rep.get("overall_progress", "on-schedule")).replace("-", " ").upper()
+    status_emoji = "🟢" if "ahead" in status_label.lower() else "🟡" if "on" in status_label.lower() else "🔴"
+
+    sections_text = ""
+    for sec in rep.get("sections", [])[:4]:
+        title = sec.get("section", "Section")
+        content = sec.get("content", "")
+        if content:
+            sections_text += f"\n▫️ <b>{title}:</b> {content[:180]}"
+
+    issues_text = ""
+    if rep.get("issues_flagged"):
+        issues_list = ", ".join(str(i) for i in rep["issues_flagged"][:3])
+        issues_text = f"\n⚠️ <b>Issues Flagged:</b> {issues_list}"
+
+    broadcast_msg = (
+        f"📊 <b>OFFICIAL DAILY SITE REPORT</b>\n"
+        f"📍 Site: <b>{site['name']}</b> ({site.get('location', 'Worksite')})\n"
+        f"📅 Date: <b>{rep.get('date', 'Today')}</b>\n"
+        f"👤 Author: <b>{rep.get('submitted_by', 'Civil Engineer')}</b>\n"
+        f"📈 Progress: {status_emoji} <b>{status_label}</b>\n\n"
+        f"📝 <b>Summary:</b>\n{rep.get('summary', 'Report recorded.')}\n"
+        f"{sections_text}\n"
+        f"{issues_text}\n\n"
+        f"🎯 <b>Tomorrow's Plan:</b>\n{rep.get('next_day_plan', 'Continue scheduled site works.')}\n\n"
+        f"<i>ConstructIQ AI Construction Management</i>"
+    )
+    sent = await telegram_service.send_message(chat_id, broadcast_msg)
+    return {"ok": bool(sent), "chat_id": chat_id, "site_id": req.site_id}
 
 
 # ── 7. AI Construction Assistant ──────────────────────────────────────────────

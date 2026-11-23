@@ -31,6 +31,7 @@ from sites_service import (
     get_all_sites,
     get_site,
     get_site_by_telegram_chat,
+    save_site_report,
     update_site,
 )
 
@@ -54,6 +55,9 @@ class TelegramService:
         self._polling_task: asyncio.Task | None = None
         self.analyzer_fn: Callable[
             [bytes, str, str], Coroutine[Any, Any, dict[str, Any]]
+        ] | None = None
+        self.report_generator_fn: Callable[
+            [str, str, str, str], Coroutine[Any, Any, dict[str, Any]]
         ] | None = None
         # Cache for pending photos sent before site is selected
         # chat_id -> dict with img_bytes, filename, sender_name, caption, msg_id
@@ -84,6 +88,12 @@ class TelegramService:
         fn: Callable[[bytes, str, str], Coroutine[Any, Any, dict[str, Any]]],
     ) -> None:
         self.analyzer_fn = fn
+
+    def set_report_generator(
+        self,
+        fn: Callable[[str, str, str, str], Coroutine[Any, Any, dict[str, Any]]],
+    ) -> None:
+        self.report_generator_fn = fn
 
     # ── Configure & Status ───────────────────────────────────────────────────
 
@@ -142,6 +152,7 @@ class TelegramService:
                 # 1. Set commands list
                 commands = [
                     {"command": "menu", "description": "📱 Show Site Selection Buttons"},
+                    {"command": "report", "description": "📋 Submit Daily Site Progress Report"},
                     {"command": "bind", "description": "📍 Link this group to a site"},
                     {"command": "status", "description": "ℹ️ Check currently linked site"},
                     {"command": "help", "description": "👷 Help & Instructions"},
@@ -515,6 +526,15 @@ class TelegramService:
         if any(clean_text.startswith(cmd) for cmd in ["refresh", "🔄 refresh", "🔄 refresh buttons"]):
             return await self._handle_refresh_command(chat_id, msg_id)
 
+        # Daily Site Report command (e.g. "/report", "report", "/progress")
+        if (
+            clean_text.startswith("/report")
+            or clean_text.startswith("report")
+            or clean_text.startswith("/progress")
+            or clean_text.startswith("progress")
+        ):
+            return await self._handle_report_command(chat_id, sender_name, text, msg_id)
+
         # Bind command (e.g., "/bind 3", "bind 3", "site 3", "3", or "📍 Site 3")
         site_match = self._extract_site_number(clean_text)
         if site_match is not None:
@@ -813,6 +833,94 @@ class TelegramService:
             )
 
         return {"type": "bind", "site_id": target_site_id}
+
+    # ── Daily Site Progress Report Handler ───────────────────────────────────
+
+    async def _handle_report_command(
+        self, chat_id: int, sender_name: str, text: str, msg_id: int | None
+    ) -> dict[str, Any] | None:
+        """Handles daily site progress reports submitted by field labour/foremen via Telegram."""
+        bound = get_site_by_telegram_chat(chat_id)
+        if not bound:
+            reply = (
+                "⚠️ This Telegram group is not linked to any construction site yet.\n\n"
+                "👇 Please tap your site button below first to link this group, then submit your daily report:"
+            )
+            inline_kb = self._build_inline_keyboard("bind")
+            await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=inline_kb)
+            return None
+
+        site_id = bound["id"]
+        site_name = bound["name"]
+
+        # Extract content after "/report" or "report"
+        clean = re.sub(r"^/?(?:report|progress)(?:@\w+)?", "", text, flags=re.IGNORECASE).strip()
+        if not clean:
+            reply = (
+                f"📋 <b>Daily Site Progress Reporting for {site_name}</b>\n\n"
+                f"👷 Field workers and supervisors can log progress anytime!\n\n"
+                f"<b>Format:</b>\n"
+                f"<code>/report [Work done today, workers count, materials, issues]</code>\n\n"
+                f"<b>Example:</b>\n"
+                f"<code>/report 16 workers today. Finished slab casting on 4th floor. 140 bags cement used. No safety delays. Tomorrow: curing & column formwork.</code>\n\n"
+                f"👉 Type your report starting with <b>/report</b> now!"
+            )
+            await self.send_message(chat_id, reply, reply_to_message_id=msg_id)
+            return None
+
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        # Generate report via AI bridge or fallback
+        if self.report_generator_fn:
+            try:
+                report_data = await self.report_generator_fn(site_name, today_str, clean, sender_name)
+            except Exception as e:
+                logger.warning("Report generator failed: %s", e)
+                report_data = {
+                    "date": today_str,
+                    "site_name": site_name,
+                    "overall_progress": "on-schedule",
+                    "summary": clean[:250],
+                    "sections": [
+                        {"section": "Work Completed", "content": clean},
+                    ],
+                    "issues_flagged": [],
+                    "next_day_plan": "Continue scheduled works tomorrow.",
+                    "submitted_by": sender_name,
+                }
+        else:
+            report_data = {
+                "date": today_str,
+                "site_name": site_name,
+                "overall_progress": "on-schedule",
+                "summary": clean[:250],
+                "sections": [
+                    {"section": "Work Completed", "content": clean},
+                ],
+                "issues_flagged": [],
+                "next_day_plan": "Continue scheduled works tomorrow.",
+                "submitted_by": sender_name,
+            }
+
+        report_data["site_id"] = site_id
+        report_data["submitted_by"] = f"📱 Telegram: {sender_name}"
+        saved = save_site_report(site_id, report_data)
+
+        status_label = report_data.get("overall_progress", "on-schedule").replace("-", " ").upper()
+        status_emoji = "🟢" if "ahead" in status_label.lower() else "🟡" if "on" in status_label.lower() else "🔴"
+
+        reply = (
+            f"📋 <b>DAILY SITE PROGRESS REPORT LOGGED</b>\n"
+            f"📍 <b>Site:</b> {site_name}\n"
+            f"📅 <b>Date:</b> {today_str}\n"
+            f"👷 <b>Reported by:</b> {sender_name}\n"
+            f"⏱️ <b>Status:</b> {status_emoji} {status_label}\n\n"
+            f"📝 <b>Summary:</b>\n{report_data.get('summary', clean)}\n\n"
+            f"📌 <b>Next Day Plan:</b>\n{report_data.get('next_day_plan', 'Continue scheduled site operations.')}\n\n"
+            f"✅ <i>Saved to Lead Civil Engineer's central web dashboard!</i>"
+        )
+        await self.send_message(chat_id, reply, reply_to_message_id=msg_id)
+        return {"type": "daily_report_logged", "site_id": site_id, "report_id": saved["id"]}
 
     # ── Photo Ingestion & Processing ─────────────────────────────────────────
 
