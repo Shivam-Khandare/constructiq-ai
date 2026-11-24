@@ -46,6 +46,7 @@ from telegram_service import telegram_service
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 BACKEND_DIR = Path(__file__).resolve().parent
+FRONTEND_DIST = BACKEND_DIR.parent / "frontend" / "dist"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -79,7 +80,11 @@ class Settings(BaseSettings):
 
     @property
     def origins_list(self) -> list[str]:
-        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        origins = [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        for default_orig in ["*", "http://localhost:5173", "http://127.0.0.1:5173"]:
+            if default_orig not in origins:
+                origins.append(default_orig)
+        return origins
 
     @property
     def max_image_size_bytes(self) -> int:
@@ -110,7 +115,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.origins_list,
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -400,12 +405,27 @@ STRICT OVERALL RISK CONSISTENCY RULE:
 • If no critical hazards exist but ANY hazard is 'high', the 'overall_risk_level' MUST be 'high'.
 • Only assign 'medium' when the only issues are PPE violations (missing hard hat, vest) or housekeeping/tripping hazards.
 
+PHOTO CLASSIFICATION & DOMAIN DISCRIMINATION (MANDATORY):
+• First evaluate if this photo is an active site safety inspection (workers, active construction tasks, scaffolding, machinery, excavation, elevation, PPE).
+• If the photo is PURELY a close-up photo of a crack in concrete, wall fissure, masonry crack, or structural defect WITHOUT any construction workers or active safety operations:
+  - Set 'is_crack_photo': true
+  - Set 'is_valid_safety_photo': false
+  - Set 'rejection_reason': 'This photograph depicts a structural crack or material defect rather than active site safety operations. Please use Crack Detection instead.'
+  - Set 'overall_risk_level': 'low'
+• Otherwise:
+  - Set 'is_crack_photo': false
+  - Set 'is_valid_safety_photo': true
+  - Set 'rejection_reason': ''
+
 LENGTH & LINE CONSTRAINTS (MANDATORY):
 • 'what_is_the_risk': MUST be concise, strictly between 4 and 6 lines/bullet points. Plain, direct English describing what is wrong.
 • 'how_to_improve': MUST be concise, strictly between 4 and 6 lines/bullet points. Numbered action steps on how to fix it immediately.
 
 Return ONLY a valid JSON object with these exact keys:
 {
+  "is_crack_photo": true | false,
+  "is_valid_safety_photo": true | false,
+  "rejection_reason": "Explanation if photo type does not match safety monitoring",
   "overall_risk_level": "critical" | "high" | "medium" | "low",
   "what_is_the_risk": "4 to 6 concise bullet points describing visible hazards.",
   "how_to_improve": "4 to 6 concise numbered action steps to fix the hazards immediately.",
@@ -428,6 +448,22 @@ Return ONLY a valid JSON object with these exact keys:
     try:
         result = await call_ai(system, prompt, image_bytes, image_mime)
 
+        # Classify photo type: check if it's a crack photo rather than safety monitoring photo
+        is_crack = bool(result.get("is_crack_photo", False))
+        is_valid_safety = bool(result.get("is_valid_safety_photo", True))
+
+        summary_lower = (str(result.get("summary", "")) + " " + str(result.get("what_is_the_risk", "")) + " " + (context or "")).lower()
+        if any(w in summary_lower for w in ["hairline crack", "shear crack", "concrete crack", "plaster crack", "wall crack", "structural crack"]) and not any(w in summary_lower for w in ["worker", "helmet", "scaffold", "trench", "fall", "ppe"]):
+            is_crack = True
+            is_valid_safety = False
+
+        result["is_crack_photo"] = is_crack
+        result["is_valid_safety_photo"] = is_valid_safety
+        if is_crack:
+            result.setdefault("rejection_reason", "This image appears to be a structural crack / defect photograph rather than an active site worker safety inspection.")
+            result["what_is_the_risk"] = "• Structural crack or concrete defect detected in photo.\n• Not an active worker safety or OSHA compliance photograph.\n• Site safety monitoring requires active site operations."
+            result["how_to_improve"] = "• Open the Crack Detection tool.\n• Upload this photograph to inspect crack severity, width, and civil repair methods."
+
         # Normalize and validate overall_risk_level
         risk_raw = str(result.get("overall_risk_level", "low")).strip().lower()
 
@@ -442,7 +478,9 @@ Return ONLY a valid JSON object with these exact keys:
         has_high = any("high" in s for s in hazard_severities) or "high" in risk_raw
         has_med = any("med" in s for s in hazard_severities) or "med" in risk_raw
 
-        if has_critical:
+        if is_crack:
+            risk = "low"
+        elif has_critical:
             risk = "critical"
         elif has_high:
             risk = "high"
@@ -469,8 +507,8 @@ Return ONLY a valid JSON object with these exact keys:
         if result.get("how_to_improve"):
             result["how_to_improve"] = _format_to_lines(result["how_to_improve"], 6, 4)
 
-        logger.info("Safety Analysis Complete: risk=%s, hazards=%d, ppe=%s",
-                    result["overall_risk_level"], len(result.get("hazards", [])), result.get("ppe_compliance"))
+        logger.info("Safety Analysis Complete: risk=%s, is_crack=%s, hazards=%d, ppe=%s",
+                    result["overall_risk_level"], result["is_crack_photo"], len(result.get("hazards", [])), result.get("ppe_compliance"))
         return result
     except Exception as e:
         logger.exception("AI provider failed for safety analysis: %s. Using emergency fallback.", e)
@@ -582,8 +620,24 @@ async def _crack_analyzer_bridge(
     """Evaluates structural crack defects, fissures, and concrete stress."""
     system = """You are a senior civil and structural engineer specializing in forensic concrete and masonry crack diagnostics.
 Analyze the provided photograph for structural cracks, wall distress, foundation settlement, or shear fissures.
+
+IMAGE RELEVANCE CHECK (MANDATORY):
+• First determine if the image contains any structural surfaces: concrete, masonry wall, beam, column, foundation slab, or plaster.
+• If the photo has NO structural elements or concrete surfaces (e.g. it is a photo of people/workers, safety helmets, vehicles, documents, nature, or general landscape without structural surfaces):
+  - Set 'is_valid_crack_photo': false
+  - Set 'crack_detected': false
+  - Set 'overall_severity': 'none'
+  - Set 'structural_risk': 'none'
+  - Set 'summary': 'No structural surface, concrete, or masonry wall detected in this image. For worker safety, scaffolding, and PPE inspection, please use Safety Monitoring.'
+  - Set 'rejection_reason': 'No structural concrete or masonry element detected for crack diagnostics.'
+• If the photo is a structural element or surface:
+  - Set 'is_valid_crack_photo': true
+  - Set 'rejection_reason': ''
+
 Return ONLY a valid JSON object matching this schema:
 {
+  "is_valid_crack_photo": true or false,
+  "rejection_reason": "Explanation if photo is not a structural element",
   "crack_detected": true or false,
   "overall_severity": "none" | "hairline" | "minor" | "moderate" | "severe" | "critical",
   "structural_risk": "none" | "low" | "medium" | "high" | "immediate",
@@ -603,6 +657,13 @@ Return ONLY the JSON object."""
     prompt = f"Analyze this image for structural cracks.{' Context: ' + context if context else ''}"
     try:
         result = await call_ai(system, prompt, image_bytes, image_mime)
+
+        is_valid_crack = bool(result.get("is_valid_crack_photo", True))
+        summary_lower = str(result.get("summary", "")).lower()
+        if any(w in summary_lower for w in ["no structural", "not a structural", "person", "worker", "helmet", "ppe", "no concrete", "no masonry"]):
+            is_valid_crack = False
+
+        result["is_valid_crack_photo"] = is_valid_crack
         result.setdefault("crack_detected", False)
         result.setdefault("overall_severity", "none")
         result.setdefault("structural_risk", "none")
@@ -613,6 +674,8 @@ Return ONLY the JSON object."""
     except Exception as e:
         logger.warning("AI crack analyzer error: %s. Using fallback.", e)
         return {
+            "is_valid_crack_photo": True,
+            "rejection_reason": "",
             "crack_detected": True,
             "overall_severity": "minor",
             "structural_risk": "low",
@@ -686,6 +749,11 @@ class SafetyAnalysisResponse(BaseModel):
     ppe_compliance: str
     immediate_actions: list[str]
     summary: str
+    what_is_the_risk: str = ""
+    how_to_improve: str = ""
+    is_crack_photo: bool = False
+    is_valid_safety_photo: bool = True
+    rejection_reason: str = ""
 
 
 class CrackDetail(BaseModel):
@@ -702,6 +770,8 @@ class CrackAnalysisResponse(BaseModel):
     cracks: list[CrackDetail]
     immediate_action_required: bool
     summary: str
+    is_valid_crack_photo: bool = True
+    rejection_reason: str = ""
 
 
 class MaterialItem(BaseModel):
@@ -828,8 +898,20 @@ class AssistantResponse(BaseModel):
 #  ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
 
+@app.get("/api/info")
+def root_info():
+    return {
+        "message": "Welcome to ConstructIQ AI",
+        "documentation": "/docs",
+        "health": "/health",
+        "version": "2.0.0",
+        "ai_provider": settings.ai_provider,
+    }
+
 @app.get("/")
 def root():
+    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
+        return FileResponse(FRONTEND_DIST / "index.html")
     return {
         "message": "Welcome to ConstructIQ AI",
         "documentation": "/docs",
@@ -1275,6 +1357,17 @@ async def generate_report(
     equipment_used: str = Form(default=""),
     issues: str = Form(default=""), notes: str = Form(default=""),
 ):
+    if workers_present <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Missing required detail: Number of workers present on site is mandatory. Please enter a valid worker count (e.g. 15)."
+        )
+    if not activities_completed or len(activities_completed.strip()) < 8:
+        raise HTTPException(
+            status_code=422,
+            detail="Missing required detail: Key activities completed today is required. Please specify what work was executed."
+        )
+
     image_bytes = None
     image_mime = "image/jpeg"
     if file and file.filename:
@@ -1406,3 +1499,11 @@ Return ONLY the JSON object."""
     result.setdefault("follow_up_suggestions", [])
     result.setdefault("references", [])
     return result
+
+
+# ── Static Frontend Files (Unified Single-Deployment Mode) ───────────────────
+FRONTEND_DIST = BACKEND_DIR.parent / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+    logger.info("Mounted production frontend from %s", FRONTEND_DIST)

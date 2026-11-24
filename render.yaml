@@ -1,0 +1,38 @@
+services:
+  # ── ConstructIQ AI FastAPI Backend Web Service ──
+  - type: web
+    name: constructiq-api
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "*"
+
+  # ── ConstructIQ AI Frontend High-Speed Edge Static Site ──
+  - type: static
+    name: constructiq-ui
+    region: oregon
+    plan: free
+    buildCommand: "npm --prefix frontend install && npm --prefix frontend run build"
+    staticPublishPath: "./frontend/dist"
+    routes:
+      - type: rewrite
+        source: "/*"
+        destination: "/index.html"
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: constructiq-api
+          property: host

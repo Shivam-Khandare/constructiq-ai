@@ -1,0 +1,34 @@
+[
+  {
+    "id": "report-92cf9fc9",
+    "site_id": "site-6",
+    "site_name": "Site 6",
+    "date": "2026-11-24",
+    "timestamp": "2026-11-24T04:58:36.002304+00:00",
+    "overall_progress": "behind-schedule",
+    "summary": "Grouting work was completed with 10 workers, but the discovery of wall cracks has been flagged as a critical issue requiring immediate attention.",
+    "sections": [
+      {
+        "section": "Work Completed",
+        "content": "Grouting operations completed."
+      },
+      {
+        "section": "Workforce & Labor",
+        "content": "10 workers on-site."
+      },
+      {
+        "section": "Equipment & Materials",
+        "content": "90 bags of cement consumed."
+      },
+      {
+        "section": "Safety & Site Conditions",
+        "content": "Structural concerns noted regarding wall cracks; weather conditions not specified."
+      }
+    ],
+    "issues_flagged": [
+      "Cracks observed in walls requiring structural assessment"
+    ],
+    "next_day_plan": "Conduct structural inspection of wall cracks and continue scheduled site activities.",
+    "submitted_by": "\ud83d\udcf1 Telegram: Shivam Khandare"
+  }
+]

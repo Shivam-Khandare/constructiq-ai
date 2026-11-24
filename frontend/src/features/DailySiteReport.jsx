@@ -110,6 +110,15 @@ export default function DailySiteReport({ backendStatus }) {
       setError("Site name and date are required.");
       return;
     }
+    const workers = parseInt(fields.workers_present, 10);
+    if (!fields.workers_present || isNaN(workers) || workers <= 0) {
+      setError("⚠️ Missing required detail: Number of workers present on site is mandatory. Please enter a valid worker count (e.g. 15).");
+      return;
+    }
+    if (!fields.activities_completed || fields.activities_completed.trim().length < 8) {
+      setError("⚠️ Missing required detail: Key activities completed today is required. Please provide a description of the tasks executed.");
+      return;
+    }
     setLoading(true);
     setError("");
     setResult(null);
@@ -257,24 +266,26 @@ export default function DailySiteReport({ backendStatus }) {
             </div>
 
             <div className="form-group">
-              <label>Activities Completed</label>
+              <label>Activities Completed * (Mandatory)</label>
               <textarea
                 placeholder="Describe work completed today (e.g. 4th floor slab concrete pour completed, curing on 3rd floor)..."
                 value={fields.activities_completed}
                 onChange={(e) => set("activities_completed", e.target.value)}
                 rows={3}
+                required
               />
             </div>
 
             <div className="form-row">
               <div className="form-group">
-                <label>Workers Present</label>
+                <label>Workers Present * (Mandatory Headcount)</label>
                 <input
                   type="number"
                   placeholder="e.g. 24"
                   value={fields.workers_present}
                   onChange={(e) => set("workers_present", e.target.value)}
-                  min={0}
+                  min={1}
+                  required
                 />
               </div>
               <div className="form-group">

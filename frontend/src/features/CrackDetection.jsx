@@ -267,6 +267,28 @@ export default function CrackDetection({ backendStatus }) {
 
           {result && (
             <div className="results">
+              {result.is_valid_crack_photo === false && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecdd3",
+                    borderRadius: "8px",
+                    marginBottom: "14px",
+                    color: "#991b1b",
+                    fontSize: "13px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                  }}
+                >
+                  <span style={{ fontSize: "20px" }}>ℹ️</span>
+                  <div>
+                    <b>No Structural Element Detected:</b> No concrete, masonry wall, or structural surfaces were detected in this photograph. If you intended to inspect site worker safety, scaffolding, or PPE compliance, please use the <b>🦺 Safety Monitoring</b> tool.
+                  </div>
+                </div>
+              )}
+
               <div
                 className="risk-banner"
                 style={{

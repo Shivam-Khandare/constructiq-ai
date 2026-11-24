@@ -1,0 +1,45 @@
+[
+  {
+    "id": "photo-36175bb7",
+    "site_id": "site-6",
+    "filename": "site-6_d616cc1537.jpg",
+    "url": "/api/sites/site-6/images/site-6_d616cc1537.jpg",
+    "timestamp": "2026-11-24T04:52:32.900451+00:00",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Photo sent from phone via Telegram",
+    "safety_analysis": {
+      "overall_risk_level": "critical",
+      "what_is_the_risk": "• Multiple workers are operating at significant heights without fall protection harnesses or lanyards.\n• Workers are climbing and standing on unstable, vertical rebar cages with no secure platforms.\n• There is a complete absence of guardrails, safety netting, or engineered scaffolding for elevated work.\n• Workers are exposed to impalement hazards from vertical rebar protruding throughout the work area.\n• The work method relies on balancing on structural steel, creating an imminent risk of fatal falls.",
+      "how_to_improve": "• Immediately stop all work at height and require all personnel to descend to a safe level.\n• Install certified scaffolding with full guardrails, mid-rails, and toe-boards for all elevated tasks.\n• Mandate the use of full-body harnesses with double-lanyard shock absorbers tied off to independent lifelines.\n• Implement a strict 100% tie-off policy for any work performed above 1.8 meters.\n• Cover all exposed vertical rebar ends with protective mushroom caps to prevent impalement injuries.",
+      "ppe_compliance": "partial",
+      "hazards": [
+        {
+          "type": "Fall Risk",
+          "severity": "critical",
+          "location": "Entire vertical rebar structure",
+          "description": "Workers are climbing and standing on rebar without fall arrest systems.",
+          "recommendation": "Install scaffolding and enforce 100% tie-off policy."
+        },
+        {
+          "type": "Structural",
+          "severity": "high",
+          "location": "Vertical rebar columns",
+          "description": "Exposed vertical rebar presents a severe impalement hazard.",
+          "recommendation": "Install rebar safety caps on all exposed vertical ends."
+        },
+        {
+          "type": "PPE Violation",
+          "severity": "medium",
+          "location": "Various workers",
+          "description": "Inconsistent use of high-visibility vests and proper safety footwear.",
+          "recommendation": "Enforce mandatory site-wide PPE policy including vests and boots."
+        }
+      ],
+      "immediate_actions": [
+        "Halt all work on the rebar columns immediately.",
+        "Conduct a mandatory safety stand-down to address fall protection requirements."
+      ],
+      "summary": "The site exhibits critical safety failures regarding fall protection and impalement hazards. Immediate work stoppage and the installation of proper scaffolding are required to prevent a fatal incident."
+    }
+  }
+]

@@ -1012,6 +1012,31 @@ class TelegramService:
             await self.send_message(chat_id, reply, reply_to_message_id=msg_id)
             return None
 
+        # Edge Case Validation: Enforce required details like worker count and work done
+        has_workers = bool(re.search(r'\b(?:\d+\s*(?:workers?|labour|labor|men|people|headcount|masons?|helpers?)|(?:workers?|labour|labor|headcount|manpower)\s*[:=-]?\s*\d+)\b', clean, re.IGNORECASE))
+        has_activities = len(clean) >= 15
+
+        if not has_workers or not has_activities:
+            action_kb = self._build_site_action_keyboard(site_id)
+            missing_items = []
+            if not has_workers:
+                missing_items.append("• ❌ <b>Worker Headcount Missing:</b> You must specify the number of workers on site today (e.g., <i>'16 workers'</i> or <i>'Headcount: 14'</i>).")
+            if not has_activities:
+                missing_items.append("• ❌ <b>Work Progress Too Short:</b> Please specify the key work activities or structural tasks completed today.")
+
+            missing_text = "\n".join(missing_items)
+            reply = (
+                f"⚠️ <b>INCOMPLETE DAILY REPORT — Action Required</b>\n\n"
+                f"Hi {sender_name}, your daily report for <b>{site_name}</b> could not be submitted because important details are missing:\n\n"
+                f"{missing_text}\n\n"
+                f"👉 <b>Please re-enter your report with all required details:</b>\n"
+                f"<code>/report [Workers count, work done, materials, issues]</code>\n\n"
+                f"<i>Example:</i>\n"
+                f"<code>/report 16 workers. Completed 3rd floor slab casting. 90 bags cement. Tomorrow: curing & formwork.</code>"
+            )
+            await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=action_kb)
+            return {"type": "daily_report_rejected_missing_details", "site_id": site_id}
+
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # Generate report via AI bridge or fallback
@@ -1175,6 +1200,20 @@ class TelegramService:
         context = f"Site: {site_name}. Worker note: {caption}"
         safety_analysis = await self._analyze(img_bytes, context)
 
+        # Edge Case: Reject crack photos sent while in Safety Monitoring mode!
+        if safety_analysis.get("is_crack_photo") or not safety_analysis.get("is_valid_safety_photo", True):
+            action_kb = self._build_site_action_keyboard(target_site_id)
+            reply = (
+                f"⚠️ <b>PHOTO REJECTED: STRUCTURAL CRACK DETECTED</b>\n\n"
+                f"Hi {sender_name}, this photo is a <b>structural crack / material fissure</b>, not an active site worker safety inspection.\n\n"
+                f"👉 <b>To analyze this crack and log it under {site_name}:</b>\n"
+                f"1. Tap <b>'🔍 2. Crack Detection'</b> below to switch mode.\n"
+                f"2. Send your crack photo again.\n\n"
+                f"<i>Our structural AI will diagnose crack severity, width, and civil repair methods.</i>"
+            )
+            await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=action_kb)
+            return {"type": "photo_rejected_is_crack", "site_id": target_site_id}
+
         # Store photo in album
         sender_label = f"📱 Telegram: {sender_name}"
         record = add_site_photo(
@@ -1257,6 +1296,7 @@ class TelegramService:
                 }
         else:
             crack_analysis = {
+                "is_valid_crack_photo": True,
                 "crack_detected": False,
                 "overall_severity": "none",
                 "structural_risk": "none",
@@ -1264,6 +1304,19 @@ class TelegramService:
                 "immediate_action_required": False,
                 "summary": "No cracks detected."
             }
+
+        # Edge Case: Reject non-structural photos sent while in Crack Detection mode!
+        if not crack_analysis.get("is_valid_crack_photo", True):
+            action_kb = self._build_site_action_keyboard(target_site_id)
+            reply = (
+                f"⚠️ <b>PHOTO REJECTED: NO STRUCTURAL ELEMENT DETECTED</b>\n\n"
+                f"Hi {sender_name}, no concrete, masonry wall, or structural elements were detected in this image for crack diagnosis.\n\n"
+                f"👉 <b>If this was meant for worker safety, scaffolding, or PPE inspection:</b>\n"
+                f"1. Tap <b>'🦺 1. Safety Monitoring'</b> below to switch mode.\n"
+                f"2. Send your photo for safety auditing."
+            )
+            await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=action_kb)
+            return {"type": "photo_rejected_not_crack", "site_id": target_site_id}
 
         sender_label = f"📱 Telegram: {sender_name}"
         record = add_site_crack(

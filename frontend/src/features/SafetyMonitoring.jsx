@@ -983,6 +983,28 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
 
           {standaloneResult && (
             <div className="results">
+              {standaloneResult.is_crack_photo && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    background: "#fffbeb",
+                    border: "1px solid #fcd34d",
+                    borderRadius: "8px",
+                    marginBottom: "14px",
+                    color: "#92400e",
+                    fontSize: "13px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                  }}
+                >
+                  <span style={{ fontSize: "20px" }}>⚠️</span>
+                  <div>
+                    <b>Structural Crack Photo Detected:</b> This photograph depicts a structural concrete crack or material defect rather than active site worker safety. For forensic crack width diagnosis, severity, and civil engineering repairs, please use the <b>🔍 Crack Detection</b> tool.
+                  </div>
+                </div>
+              )}
+
               <div
                 className="risk-banner"
                 style={{

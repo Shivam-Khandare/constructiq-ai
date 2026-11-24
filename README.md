@@ -138,29 +138,36 @@ Visit `http://localhost:5173` to access the ConstructIQ AI workspace.
 
 ## Production Deployment Guide
 
-### Deploying Frontend to Vercel (Free & Instant)
-1. Push your repository to your GitHub account (`https://github.com/shivamojha23/constructiq-ai`).
-2. Log into [vercel.com](https://vercel.com) using your GitHub account.
-3. Click **Add New** > **Project** and select your `constructiq-ai` repository.
-4. Set **Root Directory** to `frontend`.
-5. Under Environment Variables, set:
-   - `VITE_API_URL` = Your backend URL (e.g., `https://your-backend.onrender.com`)
-6. Click **Deploy**. Vercel will generate your personal live link (e.g. `https://constructiq-ai.vercel.app`).
+### Option 1: Ultra-Fast Global Edge Deployment (Recommended — Instant 0s Load Time)
+This setup guarantees the fastest possible page load (0ms cold start) by serving the frontend from Vercel's global edge network and connecting to the FastAPI backend.
 
-### Deploying Backend to Render (Free)
-1. Log into [render.com](https://render.com).
-2. Click **New** > **Web Service** and link your `constructiq-ai` repository.
-3. Set **Root Directory** to `backend`.
-4. Build Command: `pip install -r requirements.txt`
-5. Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-6. Add Environment Variables:
-   - `USE_OLLAMA`: `false`
-   - `GEMINI_API_KEY`: `<Your Gemini API Key>`
-   - `ALLOWED_ORIGINS`: `<Your Vercel Frontend URL>`
+1. **Deploy Frontend to Vercel**:
+   - Log into [vercel.com](https://vercel.com) using your GitHub account.
+   - Click **Add New** > **Project** and select your repository: **`Shivam-Khandare/constructiq-ai`**.
+   - Root directory is pre-configured via `vercel.json` (or set Root Directory to `frontend`).
+   - Add Environment Variable:
+     - `VITE_API_BASE_URL` = Your backend URL (e.g. `https://constructiq-api.onrender.com`)
+   - Click **Deploy**. Your app is immediately live with edge CDN acceleration!
+
+2. **Deploy Backend to Render / Railway**:
+   - Log into [render.com](https://render.com) > **New** > **Blueprint** (connect `render.yaml`) or **Web Service**.
+   - Root directory: `backend`.
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - Add Environment Variables:
+     - `GEMINI_API_KEY`: `<Your Gemini Key>`
+     - `ALLOWED_ORIGINS`: `*`
+     - `TELEGRAM_BOT_TOKEN`: `<Your Telegram Bot Token>`
+
+### Option 2: Unified Single-Service Full-Stack Deployment (Render / Railway / Docker)
+Because FastAPI is configured to automatically serve the pre-compiled `frontend/dist` static assets, you can run the entire system on a single port on Render or Railway:
+1. Build frontend: `npm --prefix frontend install && npm --prefix frontend run build`
+2. Run backend: `cd backend && uvicorn main:app --host 0.0.0.0 --port 8000`
+3. Opening `http://your-app-url` serves the full ConstructIQ AI interactive UI with all API endpoints active.
 
 ---
 
 ## Author & License
 
-Developed and maintained by **Shivam Ojha** ([@shivamojha23](https://github.com/shivamojha23)).
+Developed and maintained by **Shivam Khandare** ([@Shivam-Khandare](https://github.com/Shivam-Khandare)).  
 Licensed under the MIT License.

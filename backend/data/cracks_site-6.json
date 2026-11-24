@@ -1,0 +1,50 @@
+[
+  {
+    "id": "crack-f45f4195",
+    "site_id": "site-6",
+    "filename": "site-6_crack_de393460.jpg",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Structural crack inspection via Telegram",
+    "timestamp": "2026-11-24T04:54:50.740067+00:00",
+    "crack_analysis": {
+      "crack_detected": true,
+      "overall_severity": "moderate",
+      "structural_risk": "medium",
+      "cracks": [
+        {
+          "type": "Vertical",
+          "severity": "moderate",
+          "location": "Mid-wall, extending from the roofline down towards the base",
+          "probable_cause": "Differential foundation settlement or thermal movement",
+          "recommended_action": "Structural monitoring and geotechnical investigation to determine if movement is active"
+        }
+      ],
+      "immediate_action_required": false,
+      "summary": "The wall exhibits a significant vertical crack likely caused by differential settlement or thermal expansion/contraction. Further investigation is required to determine if the crack is active and to assess the integrity of the foundation."
+    }
+  },
+  {
+    "id": "crack-45be2d0a",
+    "site_id": "site-6",
+    "filename": "site-6_crack_c27471be.jpg",
+    "sender": "📱 Telegram: Shivam Khandare",
+    "caption": "Structural crack inspection via Telegram",
+    "timestamp": "2026-11-24T04:53:55.082070+00:00",
+    "crack_analysis": {
+      "crack_detected": true,
+      "overall_severity": "severe",
+      "structural_risk": "high",
+      "cracks": [
+        {
+          "type": "Diagonal Shear",
+          "severity": "severe",
+          "location": "Upper wall section extending from roofline to window frame",
+          "probable_cause": "Differential foundation settlement or structural load redistribution",
+          "recommended_action": "Structural underpinning and professional geotechnical assessment"
+        }
+      ],
+      "immediate_action_required": true,
+      "summary": "The diagonal crack indicates significant structural distress, likely caused by differential foundation settlement. Immediate professional evaluation is required to determine the stability of the wall and the necessity of underpinning."
+    }
+  }
+]
