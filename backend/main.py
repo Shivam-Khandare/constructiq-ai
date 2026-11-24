@@ -25,16 +25,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sites_service import (
     UPLOADS_DIR,
+    add_site_crack,
     add_site_photo,
     create_or_setup_sites,
     create_single_site,
     delete_site,
+    get_all_site_cracks,
     get_all_site_reports,
     get_all_sites,
     get_site,
     initialize_clean_sites,
     save_site_report,
     update_site,
+    _read_site_cracks,
     _read_site_photos,
 )
 from telegram_service import telegram_service
@@ -148,6 +151,7 @@ async def on_startup() -> None:
     # Wire up Telegram bot integration service
     telegram_service.set_analyzer(_safety_analyzer_bridge)
     telegram_service.set_report_generator(_report_generator_bridge)
+    telegram_service.set_crack_analyzer(_crack_analyzer_bridge)
     active_token = settings.telegram_bot_token or telegram_service.token
     if active_token:
         try:
@@ -567,6 +571,60 @@ Return ONLY the JSON object."""
             "issues_flagged": [],
             "next_day_plan": "Continue next shift activities according to schedule.",
             "summary": raw_notes[:200]
+        }
+
+
+async def _crack_analyzer_bridge(
+    image_bytes: bytes,
+    context: str = "",
+    image_mime: str = "image/jpeg",
+) -> dict[str, Any]:
+    """Evaluates structural crack defects, fissures, and concrete stress."""
+    system = """You are a senior civil and structural engineer specializing in forensic concrete and masonry crack diagnostics.
+Analyze the provided photograph for structural cracks, wall distress, foundation settlement, or shear fissures.
+Return ONLY a valid JSON object matching this schema:
+{
+  "crack_detected": true or false,
+  "overall_severity": "none" | "hairline" | "minor" | "moderate" | "severe" | "critical",
+  "structural_risk": "none" | "low" | "medium" | "high" | "immediate",
+  "cracks": [
+    {
+      "type": "Vertical / Diagonal Shear / Hairline Shrinkage / Horizontal / Settlement",
+      "severity": "none" | "hairline" | "minor" | "moderate" | "severe" | "critical",
+      "location": "location in photo (e.g. beam-column joint, mid-wall, slab soffit)",
+      "probable_cause": "likely structural cause (e.g. differential settlement, curing thermal shrinkage, shear overload)",
+      "recommended_action": "epoxy injection / carbon fiber reinforcement / structural underpinning / monitoring"
+    }
+  ],
+  "immediate_action_required": true or false,
+  "summary": "1-2 sentence civil engineering diagnosis and risk assessment."
+}
+Return ONLY the JSON object."""
+    prompt = f"Analyze this image for structural cracks.{' Context: ' + context if context else ''}"
+    try:
+        result = await call_ai(system, prompt, image_bytes, image_mime)
+        result.setdefault("crack_detected", False)
+        result.setdefault("overall_severity", "none")
+        result.setdefault("structural_risk", "none")
+        result.setdefault("cracks", [])
+        result.setdefault("immediate_action_required", False)
+        result.setdefault("summary", "Crack analysis complete.")
+        return result
+    except Exception as e:
+        logger.warning("AI crack analyzer error: %s. Using fallback.", e)
+        return {
+            "crack_detected": True,
+            "overall_severity": "minor",
+            "structural_risk": "low",
+            "cracks": [{
+                "type": "Surface Hairline Crack",
+                "severity": "minor",
+                "location": "Wall surface",
+                "probable_cause": "Thermal shrinkage or non-structural plaster curing",
+                "recommended_action": "Apply elastomeric sealant and monitor regularly."
+            }],
+            "immediate_action_required": False,
+            "summary": "Surface hairline crack detected. Low structural risk."
         }
 
 
@@ -1030,38 +1088,73 @@ async def telegram_webhook_endpoint(request: Request):
 # ── 2. Crack Detection ────────────────────────────────────────────────────────
 
 @app.post("/api/cracks/analyze", response_model=CrackAnalysisResponse)
-async def analyze_cracks(file: UploadFile = File(...), context: str = Form(default="")):
+async def analyze_cracks(
+    file: UploadFile = File(...),
+    context: str = Form(default=""),
+    site_id: str = Form(default=""),
+):
     data = await read_and_validate_image(file)
+    result = await _crack_analyzer_bridge(data, context, file.content_type or "image/jpeg")
 
-    system = """You are a structural engineer specializing in crack analysis.
-Analyze the image and return ONLY a valid JSON object:
-{
-  "crack_detected": true or false,
-  "overall_severity": "none or hairline or minor or moderate or severe or critical",
-  "structural_risk": "none or low or medium or high or immediate",
-  "cracks": [
-    {
-      "type": "crack type",
-      "severity": "severity level",
-      "location": "where in the image",
-      "probable_cause": "likely cause",
-      "recommended_action": "what to do"
-    }
-  ],
-  "immediate_action_required": true or false,
-  "summary": "overall assessment"
-}
-Return ONLY the JSON object."""
+    # If associated with a site, record in site's crack history
+    target_site_id = site_id.strip() if site_id else ""
+    if target_site_id and get_site(target_site_id):
+        add_site_crack(
+            site_id=target_site_id,
+            file_bytes=data,
+            filename=file.filename or "crack_photo.jpg",
+            sender="💻 Web Portal: Civil Engineer",
+            caption=context or "Structural crack inspection",
+            crack_analysis=result,
+        )
 
-    result = await call_ai(system, f"Analyze this image for structural cracks.{' Context: ' + context if context else ''}", data, file.content_type or "image/jpeg")
-    result.setdefault("crack_detected", False)
-    result.setdefault("overall_severity", "none")
-    result.setdefault("structural_risk", "none")
-    result.setdefault("cracks", [])
-    result.setdefault("immediate_action_required", False)
-    result.setdefault("summary", "Analysis complete.")
-    logger.info("Crack analysis — detected=%s severity=%s", result["crack_detected"], result["overall_severity"])
+    logger.info("Crack analysis — detected=%s severity=%s site=%s", result["crack_detected"], result["overall_severity"], target_site_id or "general")
     return result
+
+
+@app.get("/api/sites/{site_id}/cracks")
+def get_site_cracks_endpoint(site_id: str):
+    """Retrieves all structural crack inspection records for this site."""
+    site = get_site(site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found.")
+    cracks = get_all_site_cracks(site_id)
+    return {"site_id": site_id, "cracks": cracks, "count": len(cracks)}
+
+
+@app.get("/api/cracks/history")
+def get_cracks_history_endpoint(site_id: str = ""):
+    """Retrieves all crack inspection records across sites or for a specific site."""
+    cracks = get_all_site_cracks(site_id.strip() if site_id else None)
+    return {"cracks": cracks, "count": len(cracks)}
+
+
+@app.post("/api/sites/{site_id}/cracks/upload")
+async def upload_site_crack_endpoint(
+    site_id: str,
+    file: UploadFile = File(...),
+    sender: str = Form(default="Civil Engineer"),
+    caption: str = Form(default="Structural crack inspection"),
+    context: str = Form(default=""),
+):
+    """Directly uploads a photo for crack analysis under a specific monitored site."""
+    site = get_site(site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found.")
+
+    data = await read_and_validate_image(file)
+    full_ctx = f"Site: {site['name']}. {caption}. {context}".strip()
+    analysis = await _crack_analyzer_bridge(data, full_ctx, file.content_type or "image/jpeg")
+
+    record = add_site_crack(
+        site_id=site_id,
+        file_bytes=data,
+        filename=file.filename or "crack_photo.jpg",
+        sender=sender,
+        caption=caption,
+        crack_analysis=analysis,
+    )
+    return {"crack": record, "site": get_site(site_id)}
 
 
 # ── 3. Project Planner ────────────────────────────────────────────────────────

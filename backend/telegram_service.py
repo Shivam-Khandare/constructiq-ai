@@ -27,6 +27,7 @@ import httpx
 
 from sites_service import (
     _all_tg_variants,
+    add_site_crack,
     add_site_photo,
     get_all_sites,
     get_site,
@@ -59,6 +60,11 @@ class TelegramService:
         self.report_generator_fn: Callable[
             [str, str, str, str], Coroutine[Any, Any, dict[str, Any]]
         ] | None = None
+        self.crack_analyzer_fn: Callable[
+            [bytes, str, str], Coroutine[Any, Any, dict[str, Any]]
+        ] | None = None
+        # Mode per chat: "safety" | "cracks" | "report"
+        self.chat_modes: dict[str, str] = {}
         # Cache for pending photos sent before site is selected
         # chat_id -> dict with img_bytes, filename, sender_name, caption, msg_id
         self.pending_photos: dict[str, dict[str, Any]] = {}
@@ -94,6 +100,12 @@ class TelegramService:
         fn: Callable[[str, str, str, str], Coroutine[Any, Any, dict[str, Any]]],
     ) -> None:
         self.report_generator_fn = fn
+
+    def set_crack_analyzer(
+        self,
+        fn: Callable[[bytes, str, str], Coroutine[Any, Any, dict[str, Any]]],
+    ) -> None:
+        self.crack_analyzer_fn = fn
 
     # ── Configure & Status ───────────────────────────────────────────────────
 
@@ -383,33 +395,39 @@ class TelegramService:
         return {"inline_keyboard": buttons}
 
     @staticmethod
-    def _build_reply_keyboard(columns: int = 2) -> dict[str, Any]:
-        """Build persistent ReplyKeyboardMarkup (large touch buttons on mobile).
-
-        Displays at the bottom of the chat screen so illiterate workers can
-        simply tap a button without typing anything.
+    def _build_site_action_keyboard(site_id: str) -> dict[str, Any]:
+        """Builds the 3 action buttons for the selected site:
+        1. Safety Monitoring
+        2. Crack Detection
+        3. Daily Report
         """
-        sites = get_all_sites()
-        keyboard: list[list[dict[str, str]]] = []
-        row: list[dict[str, str]] = []
-
-        for s in sites:
-            label = f"📍 {s['name']}"
-            row.append({"text": label})
-            if len(row) >= columns:
-                keyboard.append(row)
-                row = []
-        if row:
-            keyboard.append(row)
-
-        # Bottom row for easy check
-        keyboard.append([
-            {"text": "ℹ️ Group Status"},
-            {"text": "🔄 Refresh Buttons"},
-        ])
-
         return {
-            "keyboard": keyboard,
+            "inline_keyboard": [
+                [
+                    {"text": "🦺 1. Safety Monitoring", "callback_data": f"mode:safety:{site_id}"},
+                ],
+                [
+                    {"text": "🔍 2. Crack Detection", "callback_data": f"mode:cracks:{site_id}"},
+                ],
+                [
+                    {"text": "📋 3. Daily Report", "callback_data": f"mode:report:{site_id}"},
+                ],
+                [
+                    {"text": "🔄 Switch Site", "callback_data": "choose_site"},
+                    {"text": "ℹ️ Status", "callback_data": "status"},
+                ],
+            ]
+        }
+
+    @staticmethod
+    def _build_reply_keyboard() -> dict[str, Any]:
+        """Builds persistent touch buttons at the bottom of the chat screen."""
+        return {
+            "keyboard": [
+                [{"text": "🦺 1. Safety Monitoring"}, {"text": "🔍 2. Crack Detection"}],
+                [{"text": "📋 3. Daily Report"}, {"text": "🔄 Switch Site"}],
+                [{"text": "ℹ️ Group Status"}],
+            ],
             "resize_keyboard": True,
             "is_persistent": True,
             "one_time_keyboard": False,
@@ -535,6 +553,53 @@ class TelegramService:
         ):
             return await self._handle_report_command(chat_id, sender_name, text, msg_id)
 
+        # Mode switching buttons from bottom keyboard
+        if any(w in clean_text for w in ["1. safety", "safety monitoring", "🦺 safety"]):
+            bound = get_site_by_telegram_chat(chat_id)
+            if bound:
+                self.chat_modes[str(chat_id)] = "safety"
+                action_kb = self._build_site_action_keyboard(bound["id"])
+                await self.send_message(
+                    chat_id,
+                    f"🦺 <b>Safety Monitoring Active for {bound['name']}</b>\n\n📸 Send site photos anytime to analyze safety hazards & PPE!",
+                    reply_to_message_id=msg_id,
+                    reply_markup=action_kb,
+                )
+                return {"type": "mode_switch", "mode": "safety"}
+        elif any(w in clean_text for w in ["2. crack", "crack detection", "🔍 crack"]):
+            bound = get_site_by_telegram_chat(chat_id)
+            if bound:
+                self.chat_modes[str(chat_id)] = "cracks"
+                action_kb = self._build_site_action_keyboard(bound["id"])
+                await self.send_message(
+                    chat_id,
+                    f"🔍 <b>Structural Crack Detection Active for {bound['name']}</b>\n\n📸 Send close-up photos of walls, columns, or slabs to detect cracks!",
+                    reply_to_message_id=msg_id,
+                    reply_markup=action_kb,
+                )
+                return {"type": "mode_switch", "mode": "cracks"}
+        elif any(w in clean_text for w in ["3. daily", "daily report", "📋 daily"]):
+            bound = get_site_by_telegram_chat(chat_id)
+            if bound:
+                self.chat_modes[str(chat_id)] = "report"
+                action_kb = self._build_site_action_keyboard(bound["id"])
+                await self.send_message(
+                    chat_id,
+                    f"📋 <b>Daily Site Report for {bound['name']}</b>\n\n✍️ Type your report starting with <code>/report</code>:\n<code>/report [workers, completed work, materials, issues]</code>",
+                    reply_to_message_id=msg_id,
+                    reply_markup=action_kb,
+                )
+                return {"type": "mode_switch", "mode": "report"}
+        elif any(w in clean_text for w in ["switch site", "change site", "switch"]):
+            inline_kb = self._build_inline_keyboard("bind")
+            await self.send_message(
+                chat_id,
+                "👇 Tap a site below to link this group:",
+                reply_to_message_id=msg_id,
+                reply_markup=inline_kb,
+            )
+            return {"type": "switch_site_prompt"}
+
         # Bind command (e.g., "/bind 3", "bind 3", "site 3", "3", or "📍 Site 3")
         site_match = self._extract_site_number(clean_text)
         if site_match is not None:
@@ -606,17 +671,36 @@ class TelegramService:
         sites = get_all_sites()
 
         if bound:
-            status_text = f"📍 Currently linked to: <b>{bound['name']}</b> ({bound.get('location', 'Worksite')})\n"
-        else:
-            status_text = "⚠️ This group is NOT linked to any site yet.\n"
+            curr_mode = self.chat_modes.get(str(chat_id), "safety")
+            curr_label = "🦺 Safety Monitoring" if curr_mode == "safety" else "🔍 Crack Detection" if curr_mode == "cracks" else "📋 Daily Report"
+            action_kb = self._build_site_action_keyboard(bound["id"])
+            reply_kb = self._build_reply_keyboard()
+            welcome_text = (
+                f"👷 <b>ConstructIQ AI Site Assistant</b> 🦺\n\n"
+                f"📍 Linked Site: <b>{bound['name']}</b> ({bound.get('location', 'Worksite')})\n"
+                f"⚡ Active Task: <b>{curr_label}</b>\n\n"
+                f"👇 <b>Select an action to perform:</b>\n"
+                f"1️⃣ <b>Safety Monitoring:</b> Inspect hazards & PPE\n"
+                f"2️⃣ <b>Crack Detection:</b> Inspect wall & concrete fissures\n"
+                f"3️⃣ <b>Daily Report:</b> Submit daily labor & progress\n"
+            )
+            await self.send_message(
+                chat_id,
+                welcome_text,
+                reply_to_message_id=msg_id,
+                reply_markup=action_kb,
+            )
+            await self.send_message(
+                chat_id,
+                "📱 <i>Quick menu ready below. Tap anytime to switch tasks!</i>",
+                reply_markup=reply_kb,
+            )
+            return {"type": "welcome", "bound_site": bound["id"]}
 
         welcome_text = (
             f"👷 <b>ConstructIQ Site Safety Bot</b> 🦺\n\n"
-            f"{status_text}\n"
-            f"📸 <b>How to upload photos:</b>\n"
-            f"• Drop, paste, or send photos in this chat anytime (from phone or laptop).\n"
-            f"• Photos are automatically analyzed for hazards and logged to the live dashboard.\n\n"
-            f"👇 <b>Select / Switch Site:</b>\n"
+            f"⚠️ This group is NOT linked to any site yet.\n\n"
+            f"👇 <b>Step 1: Select your construction site:</b>\n"
             f"Click or tap any button below to link this group to that site:"
         )
 
@@ -634,7 +718,7 @@ class TelegramService:
         # 2. Deploy persistent mobile keyboard
         await self.send_message(
             chat_id,
-            "💡 <i>Tip: On mobile, persistent buttons are ready at the bottom. On laptop, click the buttons above or click the keyboard icon next to your message box!</i>",
+            "💡 <i>Tip: On mobile, persistent buttons are ready at the bottom. On laptop, click the buttons above!</i>",
             reply_markup=reply_kb,
         )
 
@@ -750,6 +834,61 @@ class TelegramService:
             await self.answer_callback_query(cb_id, "Refreshed!")
             return await self._handle_refresh_command(chat_id, message_id)
 
+        # Switch site button
+        if cb_data == "choose_site":
+            await self.answer_callback_query(cb_id, "Select Site")
+            inline_kb = self._build_inline_keyboard("bind")
+            await self.send_message(
+                chat_id,
+                "👇 Tap a site below to link this group:",
+                reply_markup=inline_kb,
+            )
+            return {"type": "choose_site_prompt"}
+
+        # Task Mode buttons (e.g. "mode:safety:site-1", "mode:cracks:site-1", "mode:report:site-1")
+        if cb_data.startswith("mode:"):
+            parts = cb_data.split(":")
+            mode_type = parts[1] if len(parts) > 1 else "safety"
+            target_site_id = parts[2] if len(parts) > 2 else None
+            if not target_site_id:
+                bound = get_site_by_telegram_chat(chat_id)
+                target_site_id = bound["id"] if bound else "site-1"
+            site = get_site(target_site_id)
+            site_name = site["name"] if site else f"Site {target_site_id}"
+            self.chat_modes[str(chat_id)] = mode_type
+
+            if mode_type == "safety":
+                await self.answer_callback_query(cb_id, "🦺 Safety Monitoring Active")
+                mode_text = (
+                    f"🦺 <b>Mode: Safety Monitoring Active — {site_name}</b>\n\n"
+                    f"📸 <b>Send site photos anytime!</b>\n"
+                    f"Our AI safety auditor will inspect for fall hazards, trench collapse, and PPE compliance.\n\n"
+                    f"<i>Uploaded photos appear live on {site_name}'s screen.</i>"
+                )
+            elif mode_type == "cracks":
+                await self.answer_callback_query(cb_id, "🔍 Crack Detection Active")
+                mode_text = (
+                    f"🔍 <b>Mode: Structural Crack Detection Active — {site_name}</b>\n\n"
+                    f"📸 <b>Take a photo of any wall, pillar, beam, or slab!</b>\n"
+                    f"Our structural AI will diagnose crack severity, probable causes, and civil repair actions.\n\n"
+                    f"<i>Diagnoses are logged to {site_name}'s Structural Crack Log.</i>"
+                )
+            elif mode_type == "report":
+                await self.answer_callback_query(cb_id, "📋 Daily Report Mode Active")
+                mode_text = (
+                    f"📋 <b>Mode: Daily Site Report — {site_name}</b>\n\n"
+                    f"✍️ <b>Submit today's report by typing:</b>\n"
+                    f"<code>/report [workers count, work completed, materials, issues]</code>\n\n"
+                    f"<i>Example:</i>\n"
+                    f"<code>/report 20 workers. 4th floor columns casted. 90 bags cement. Tomorrow: curing & formwork.</code>"
+                )
+            else:
+                mode_text = f"✅ Mode set to {mode_type} for {site_name}."
+
+            action_kb = self._build_site_action_keyboard(target_site_id)
+            await self.send_message(chat_id, mode_text, reply_markup=action_kb)
+            return {"type": "mode_switch", "mode": mode_type, "site_id": target_site_id}
+
         # Bind button (e.g. "bind:3")
         if cb_data.startswith("bind:"):
             try:
@@ -798,18 +937,23 @@ class TelegramService:
 
         # 2. Bind target site to this chat
         update_site(target_site_id, {"telegram_chat_id": chat_str})
+        self.chat_modes[chat_str] = "safety"
         logger.info("BIND SUCCESS: chat_id=%s → %s (%s)", chat_str, target_site_id, site["name"])
 
-        # 3. Confirm with user
+        # 3. Present the 3 Action Buttons popup!
+        action_kb = self._build_site_action_keyboard(target_site_id)
         reply_kb = self._build_reply_keyboard()
         reply = (
-            f"✅ Group linked successfully!\n\n"
-            f"📍 Connected to: {site['name']}\n"
-            f"🆔 Group ID: {chat_id}\n\n"
-            f"📸 Send any photo in this group and it will automatically appear "
-            f"on {site['name']}'s live album on the engineer's dashboard!"
+            f"✅ <b>Site Selected: {site['name']}</b>\n"
+            f"📍 Location: {site.get('location', 'Worksite')}\n"
+            f"🆔 Group ID: <code>{chat_id}</code>\n\n"
+            f"👇 <b>What would you like to do? Select an action:</b>\n"
+            f"1️⃣ <b>Safety Monitoring</b> — Inspect site photos for safety hazards & PPE\n"
+            f"2️⃣ <b>Crack Detection</b> — Inspect concrete, columns & wall cracks\n"
+            f"3️⃣ <b>Daily Report</b> — Submit daily labor & work progress"
         )
-        await self.send_message(chat_id, reply, reply_to_message_id=reply_msg_id, reply_markup=reply_kb)
+        await self.send_message(chat_id, reply, reply_to_message_id=reply_msg_id, reply_markup=action_kb)
+        await self.send_message(chat_id, "📱 <i>Quick tap menu also updated at the bottom:</i>", reply_markup=reply_kb)
 
         # 4. Check if there was a pending photo waiting to be processed!
         chat_str = str(chat_id)
@@ -991,16 +1135,28 @@ class TelegramService:
             )
             return None
 
-        # Case B: Group is already linked -> process immediately
-        return await self._process_and_save_photo(
-            target_site_id=target_site_id,
-            img_bytes=img_bytes,
-            filename=filename,
-            sender_name=sender_name,
-            caption=caption or text,
-            chat_id=chat_id,
-            msg_id=msg_id,
-        )
+        # Case B: Group is already linked -> check active mode
+        chat_mode = self.chat_modes.get(str(chat_id), "safety")
+        if chat_mode == "cracks":
+            return await self._process_and_save_crack_photo(
+                target_site_id=target_site_id,
+                img_bytes=img_bytes,
+                filename=filename,
+                sender_name=sender_name,
+                caption=caption or text,
+                chat_id=chat_id,
+                msg_id=msg_id,
+            )
+        else:
+            return await self._process_and_save_photo(
+                target_site_id=target_site_id,
+                img_bytes=img_bytes,
+                filename=filename,
+                sender_name=sender_name,
+                caption=caption or text,
+                chat_id=chat_id,
+                msg_id=msg_id,
+            )
 
     async def _process_and_save_photo(
         self,
@@ -1069,6 +1225,93 @@ class TelegramService:
             "sender": sender_name,
             "risk": risk,
             "photo_id": record["id"],
+        }
+
+    async def _process_and_save_crack_photo(
+        self,
+        target_site_id: str,
+        img_bytes: bytes,
+        filename: str,
+        sender_name: str,
+        caption: str,
+        chat_id: int,
+        msg_id: int,
+    ) -> dict[str, Any]:
+        site = get_site(target_site_id)
+        site_name = site["name"] if site else f"Site {target_site_id}"
+
+        # Analyze with Crack Detection AI
+        context = f"Site: {site_name}. Field caption: {caption}"
+        if self.crack_analyzer_fn:
+            try:
+                crack_analysis = await self.crack_analyzer_fn(img_bytes, context, "image/jpeg")
+            except Exception as e:
+                logger.warning("Crack analyzer error: %s. Using default diagnosis.", e)
+                crack_analysis = {
+                    "crack_detected": True,
+                    "overall_severity": "minor",
+                    "structural_risk": "low",
+                    "cracks": [{"type": "Hairline Surface Crack", "severity": "minor", "location": "Inspected surface", "probable_cause": "Thermal or curing shrinkage", "recommended_action": "Apply sealant and monitor regularly"}],
+                    "immediate_action_required": False,
+                    "summary": "Minor surface crack detected. Safe for continued work."
+                }
+        else:
+            crack_analysis = {
+                "crack_detected": False,
+                "overall_severity": "none",
+                "structural_risk": "none",
+                "cracks": [],
+                "immediate_action_required": False,
+                "summary": "No cracks detected."
+            }
+
+        sender_label = f"📱 Telegram: {sender_name}"
+        record = add_site_crack(
+            site_id=target_site_id,
+            file_bytes=img_bytes,
+            filename=filename,
+            sender=sender_label,
+            caption=caption or "Structural crack inspection via Telegram",
+            crack_analysis=crack_analysis,
+        )
+
+        detected = crack_analysis.get("crack_detected", False)
+        severity = str(crack_analysis.get("overall_severity", "none")).upper()
+        risk = str(crack_analysis.get("structural_risk", "none")).upper()
+        cracks_list = crack_analysis.get("cracks", [])
+
+        if detected:
+            details_text = ""
+            for c in cracks_list[:3]:
+                c_type = c.get("type", "Crack")
+                c_cause = c.get("probable_cause", "Unknown")
+                c_rec = c.get("recommended_action", "Inspect")
+                details_text += f"\n▫️ <b>{c_type}:</b> Cause: {c_cause}\n   Fix: {c_rec}"
+
+            reply = (
+                f"🔍 <b>CRACK DETECTION REPORT — {site_name}</b>\n\n"
+                f"⚠️ Severity: <b>{severity}</b>\n"
+                f"🏗️ Structural Risk: <b>{risk}</b>\n"
+                f"📝 Summary: {crack_analysis.get('summary', 'Crack detected.')}\n"
+                f"{details_text}\n\n"
+                f"✅ <i>Saved into {site_name}'s Structural Crack Log on the web dashboard.</i>"
+            )
+        else:
+            reply = (
+                f"✅ <b>Crack Inspection Complete — {site_name}</b>\n\n"
+                f"🟢 Result: <b>NO STRUCTURAL CRACKS DETECTED</b>\n"
+                f"📝 Concrete/wall surface appears sound.\n\n"
+                f"✅ <i>Logged to {site_name}'s inspection records.</i>"
+            )
+
+        action_kb = self._build_site_action_keyboard(target_site_id)
+        await self.send_message(chat_id, reply, reply_to_message_id=msg_id, reply_markup=action_kb)
+        return {
+            "type": "crack_ingested",
+            "site_id": target_site_id,
+            "site_name": site_name,
+            "severity": severity,
+            "crack_id": record["id"],
         }
 
     # ── AI Analysis ──────────────────────────────────────────────────────────

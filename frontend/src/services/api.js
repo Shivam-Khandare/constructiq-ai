@@ -138,15 +138,45 @@ export function getSiteImageUrl(siteId, filename) {
   return `${API_BASE_URL}/api/sites/${siteId}/images/${filename}`;
 }
 
-// ── 2. Crack Detection ────────────────────────────────────────────────────────
+// ── 2. Crack Detection & Per-Site Structural Log ─────────────────────────────
 
-export function analyzeCracks(file, context = "") {
+export function analyzeCracks(file, context = "", siteId = "") {
   const err = validateImageFile(file);
   if (err) return Promise.reject(new Error(err));
   const form = new FormData();
   form.append("file", file);
   form.append("context", context);
+  if (siteId) form.append("site_id", siteId);
   return request("/api/cracks/analyze", { method: "POST", body: form });
+}
+
+export const getSiteCracks = (siteId) => request(`/api/sites/${siteId}/cracks`);
+
+export const getAllCracks = (siteId = "") =>
+  request(
+    siteId
+      ? `/api/cracks/history?site_id=${encodeURIComponent(siteId)}`
+      : "/api/cracks/history"
+  );
+
+export function uploadSiteCrack(
+  siteId,
+  file,
+  caption = "",
+  sender = "Civil Engineer",
+  context = ""
+) {
+  const err = validateImageFile(file);
+  if (err) return Promise.reject(new Error(err));
+  const form = new FormData();
+  form.append("file", file);
+  form.append("caption", caption);
+  form.append("sender", sender);
+  form.append("context", context);
+  return request(`/api/sites/${siteId}/cracks/upload`, {
+    method: "POST",
+    body: form,
+  });
 }
 
 // ── 3. Project Planner ────────────────────────────────────────────────────────

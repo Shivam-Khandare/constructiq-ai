@@ -1,0 +1,42 @@
+[
+  {
+    "id": "report-32873a06",
+    "site_id": "site-1",
+    "site_name": "Site 1",
+    "date": "2026-11-23",
+    "timestamp": "2026-11-23T19:22:23.452973+00:00",
+    "overall_progress": "on-schedule",
+    "summary": "1st floor concrete slab completed successfully despite rainy weather with 12 workers on site.",
+    "sections": [
+      {
+        "section": "Work Completed",
+        "content": "1st floor concrete slab completed"
+      },
+      {
+        "section": "Workforce",
+        "content": "12 workers on site"
+      },
+      {
+        "section": "Equipment",
+        "content": "Scaffolding and tower crane operational"
+      },
+      {
+        "section": "Safety Observations",
+        "content": "Standard PPE and harness checks completed for elevated work"
+      },
+      {
+        "section": "Materials",
+        "content": "Concrete and structural framing materials utilized"
+      },
+      {
+        "section": "Weather Impact",
+        "content": "Rainy weather conditions experienced during operations"
+      }
+    ],
+    "issues_flagged": [
+      "Rainy weather"
+    ],
+    "next_day_plan": "Continue upper level framework and scaffolding adjustments",
+    "submitted_by": "\ud83d\udcbb Web Portal: Civil Engineer"
+  }
+]

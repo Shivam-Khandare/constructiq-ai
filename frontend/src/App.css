@@ -1140,31 +1140,52 @@
 .status-badge.low, .status-badge.safe {
   background: #f0fdf4;
   color: #166534;
-  border: 1px solid #bbf7d0;
+  border: 1px solid #86efac;
 }
 
 .status-badge.medium {
   background: #fffbeb;
-  color: #92400e;
-  border: 1px solid #fde68a;
+  color: #b45309;
+  border: 1px solid #fcd34d;
 }
 
 .status-badge.high {
-  background: #fff1f2;
-  color: #b91c1c;
-  border: 1px solid #fecdd3;
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fb923c;
 }
 
 .status-badge.critical {
-  background: #f5f3ff;
-  color: #6b21a8;
-  border: 1px solid #ddd6fe;
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #f87171;
 }
 
 .status-badge.none {
   background: #f8fafc;
   color: #64748b;
   border: 1px solid #e2e8f0;
+}
+
+/* Solid risk badges */
+.risk-badge.critical {
+  background: #b91c1c !important;
+  color: #ffffff !important;
+}
+
+.risk-badge.high {
+  background: #ea580c !important;
+  color: #ffffff !important;
+}
+
+.risk-badge.medium {
+  background: #d97706 !important;
+  color: #ffffff !important;
+}
+
+.risk-badge.low, .risk-badge.safe {
+  background: #16a34a !important;
+  color: #ffffff !important;
 }
 
 /* Plain language hazard box */
@@ -1214,46 +1235,7 @@
   font-weight: 500;
   white-space: pre-line;
   line-height: 1.45;
-}
-
-/* ── Screen Card Compact Hierarchy (Smaller Risk & Fix Font on Grid) ── */
-.screen-card .plain-risk-box {
-  padding: 6px 9px;
-  gap: 4px;
-  font-size: 10.5px;
-  line-height: 1.35;
-  border-radius: 6px;
-}
-
-.screen-card .plain-risk-label {
-  font-size: 10.5px;
-  font-weight: 700;
-}
-
-.screen-card .plain-risk-desc,
-.screen-card .plain-improve-desc {
-  font-size: 10px;
-  line-height: 1.32;
-}
-
-/* ── Album Feed Spacious Hierarchy (Detailed, Larger Text for Album View) ── */
-.album-feed .plain-risk-box {
-  padding: 12px 16px;
-  gap: 8px;
-  font-size: 13.5px;
-  line-height: 1.55;
-  border-radius: 8px;
-}
-
-.album-feed .plain-risk-label {
-  font-size: 13.5px;
-  font-weight: 700;
-}
-
-.album-feed .plain-risk-desc,
-.album-feed .plain-improve-desc {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
 }
 
 /* ── Lead Civil Engineer Mode Status Pill ── */

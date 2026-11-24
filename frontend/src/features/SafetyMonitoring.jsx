@@ -4,6 +4,7 @@ import {
   configureTelegram,
   createSite,
   deleteSite,
+  getSiteCracks,
   getSiteImageUrl,
   getSitePhotos,
   getSites,
@@ -11,11 +12,22 @@ import {
   pollTelegramNow,
   setupSites,
   updateSite,
+  uploadSiteCrack,
   uploadSitePhoto,
   validateImageFile,
 } from "../services/api";
 import ImageUploader from "../components/ImageUploader";
 import Spinner from "../components/Spinner";
+
+function getCompactPoints(text, maxLines = 2) {
+  if (!text) return "";
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length <= maxLines) return lines.join("\n");
+  return lines.slice(0, maxLines).join("\n");
+}
 
 export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
   // ── Multi-Site States ───────────────────────────────────────────────────────
@@ -112,8 +124,15 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
 
   // 7. Album view
   const [activeSiteId, setActiveSiteId] = useState("");
+  const [albumTab, setAlbumTab] = useState("safety"); // "safety" | "cracks"
   const [sitePhotos, setSitePhotos] = useState([]);
+  const [siteCracks, setSiteCracks] = useState([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [loadingCracks, setLoadingCracks] = useState(false);
+  const [isCrackUploadOpen, setIsCrackUploadOpen] = useState(false);
+  const [crackUploadFile, setCrackUploadFile] = useState(null);
+  const [crackUploadCaption, setCrackUploadCaption] = useState("");
+  const [crackUploading, setCrackUploading] = useState(false);
 
   // 8. Standalone direct single photo scan
   const [standaloneFile, setStandaloneFile] = useState(null);
@@ -240,17 +259,48 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
   }
 
   // ── Album View ──────────────────────────────────────────────────────────────
-  async function handleOpenAlbum(siteId) {
+  async function handleOpenAlbum(siteId, initialTab = "safety") {
     setActiveSiteId(siteId);
     setActiveView("album");
+    setAlbumTab(initialTab);
     setLoadingPhotos(true);
+    setLoadingCracks(true);
     try {
-      const res = await getSitePhotos(siteId);
-      setSitePhotos(res?.photos || []);
+      const [photosRes, cracksRes] = await Promise.all([
+        getSitePhotos(siteId).catch(() => ({ photos: [] })),
+        getSiteCracks(siteId).catch(() => ({ cracks: [] })),
+      ]);
+      setSitePhotos(photosRes?.photos || []);
+      setSiteCracks(cracksRes?.cracks || []);
     } catch (err) {
       alert("Failed to load album: " + err.message);
     } finally {
       setLoadingPhotos(false);
+      setLoadingCracks(false);
+    }
+  }
+
+  async function handleDirectCrackUpload(e) {
+    e.preventDefault();
+    if (!crackUploadFile || !activeSiteId) return;
+    setCrackUploading(true);
+    try {
+      await uploadSiteCrack(
+        activeSiteId,
+        crackUploadFile,
+        crackUploadCaption,
+        "Civil Engineer",
+        ""
+      );
+      setIsCrackUploadOpen(false);
+      setCrackUploadFile(null);
+      setCrackUploadCaption("");
+      await handleOpenAlbum(activeSiteId, "cracks");
+      await loadData();
+    } catch (err) {
+      alert("Failed to upload crack photo: " + err.message);
+    } finally {
+      setCrackUploading(false);
     }
   }
 
@@ -331,6 +381,8 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
   const alertSitesCount = sites.filter(
     (s) => s.overall_risk === "critical" || s.overall_risk === "high"
   ).length;
+
+  const activeSite = sites.find((s) => s.id === activeSiteId) || sites[0] || null;
 
   return (
     <div className="multi-site-hub">
@@ -477,7 +529,7 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
             return (
               <div
                 key={site.id}
-                className={`screen-card ${isAlert ? "critical" : ""}`}
+                className={`screen-card ${risk}`}
               >
                 {/* Card Header with Site Name and Edit Button */}
                 <div className="screen-card-header">
@@ -502,7 +554,7 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                 {/* Photo Viewport */}
                 <div
                   className="screen-feed-viewport"
-                  onClick={() => handleOpenAlbum(site.id)}
+                  onClick={() => handleOpenAlbum(site.id, "safety")}
                   title="Click to view photo album"
                 >
                   {photoUrl ? (
@@ -546,10 +598,12 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                       {risk === "none"
                         ? "Awaiting Photo"
                         : risk === "low"
-                          ? "🟢 Safe / Low Risk"
+                          ? "🟢 Low Risk"
                           : risk === "medium"
-                            ? "🟡 Medium Caution"
-                            : "🔴 High Danger"}
+                            ? "🟡 Medium Risk"
+                            : risk === "high"
+                              ? "🟠 High Risk"
+                              : "🚨 Critical Risk"}
                     </span>
                     <span style={{ fontSize: "11px", color: "#738078" }}>
                       PPE: <b>{(site.ppe_compliance || "pending").toUpperCase()}</b>
@@ -560,11 +614,15 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                     <div className={`plain-risk-box ${isAlert ? "alert" : ""}`}>
                       <div className="plain-risk-row">
                         <span className="plain-risk-label">⚠️ Risk:</span>
-                        <span className="plain-risk-desc">{whatRisk}</span>
+                        <span className="plain-risk-desc">
+                          {getCompactPoints(whatRisk, 2)}
+                        </span>
                       </div>
                       <div className="plain-risk-row">
                         <span className="plain-risk-label">✅ Fix:</span>
-                        <span className="plain-improve-desc">{howToImprove}</span>
+                        <span className="plain-improve-desc">
+                          {getCompactPoints(howToImprove, 2)}
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -583,14 +641,21 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                   )}
                 </div>
 
-                {/* Card Footer Actions */}
+                {/* Card Footer Actions: Photos, Cracks, and Upload */}
                 <div className="screen-card-footer">
                   <button
                     className="btn-card-action primary"
-                    onClick={() => handleOpenAlbum(site.id)}
-                    title="Open full photo album"
+                    onClick={() => handleOpenAlbum(site.id, "safety")}
+                    title="Open safety inspection photo album"
                   >
-                    📸 Album ({site.photo_count || 0})
+                    🦺 Photos ({site.photo_count || 0})
+                  </button>
+                  <button
+                    className="btn-card-action"
+                    onClick={() => handleOpenAlbum(site.id, "cracks")}
+                    title="Open structural crack diagnostics for this site"
+                  >
+                    🔍 Cracks ({site.crack_count || 0})
                   </button>
                   <button
                     className="btn-card-action"
@@ -600,7 +665,7 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                     }}
                     title="Upload a photo from your computer"
                   >
-                    📤 Upload Photo
+                    📤 Upload
                   </button>
                 </div>
               </div>
@@ -650,100 +715,227 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
             </div>
 
             <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                className="btn-engineer-action primary"
-                onClick={() => {
-                  setUploadSiteId(activeSiteId);
-                  setIsUploadOpen(true);
-                }}
-              >
-                📤 Upload Photo
-              </button>
+              {albumTab === "safety" ? (
+                <button
+                  className="btn-engineer-action primary"
+                  onClick={() => {
+                    setUploadSiteId(activeSiteId);
+                    setIsUploadOpen(true);
+                  }}
+                >
+                  📤 Upload Safety Photo
+                </button>
+              ) : (
+                <button
+                  className="btn-engineer-action primary"
+                  onClick={() => {
+                    setIsCrackUploadOpen(true);
+                  }}
+                >
+                  🔍 Upload Crack Photo
+                </button>
+              )}
             </div>
           </div>
 
-          {loadingPhotos ? (
-            <div style={{ textAlign: "center", padding: "40px" }}>
-              <Spinner /> Loading site photo album...
-            </div>
-          ) : sitePhotos.length === 0 ? (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "40px",
-                background: "#ffffff",
-                borderRadius: "10px",
-                border: "1px solid #e5ebe6",
-              }}
+          {/* Sub-tabs for Album: Safety Inspections vs Structural Cracks */}
+          <div style={{ display: "flex", gap: "8px", margin: "14px 0" }}>
+            <button
+              className={`view-btn ${albumTab === "safety" ? "active" : ""}`}
+              onClick={() => setAlbumTab("safety")}
             >
-              <p style={{ margin: "0 0 12px", color: "#738078" }}>
-                No photos uploaded for this site yet.
-              </p>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  setUploadSiteId(activeSiteId);
-                  setIsUploadOpen(true);
+              🦺 Safety Photos ({sitePhotos.length})
+            </button>
+            <button
+              className={`view-btn ${albumTab === "cracks" ? "active" : ""}`}
+              onClick={() => setAlbumTab("cracks")}
+            >
+              🔍 Structural Cracks ({siteCracks.length})
+            </button>
+          </div>
+
+          {albumTab === "safety" ? (
+            loadingPhotos ? (
+              <div style={{ textAlign: "center", padding: "40px" }}>
+                <Spinner /> Loading site photo album...
+              </div>
+            ) : sitePhotos.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "40px",
+                  background: "#ffffff",
+                  borderRadius: "10px",
+                  border: "1px solid #e5ebe6",
                 }}
               >
-                Upload First Photo
-              </button>
-            </div>
+                <p style={{ margin: "0 0 12px", color: "#738078" }}>
+                  No safety photos uploaded for this site yet.
+                </p>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    setUploadSiteId(activeSiteId);
+                    setIsUploadOpen(true);
+                  }}
+                >
+                  Upload First Photo
+                </button>
+              </div>
+            ) : (
+              <div className="album-feed">
+                {sitePhotos
+                  .slice()
+                  .reverse()
+                  .map((photo, idx) => {
+                    const analysis = photo.safety_analysis || {};
+                    const risk = analysis.overall_risk_level || "low";
+                    const whatRisk =
+                      analysis.what_is_the_risk ||
+                      analysis.hazards?.[0]?.description ||
+                      analysis.summary;
+                    const howToImprove =
+                      analysis.how_to_improve ||
+                      analysis.hazards?.[0]?.recommendation ||
+                      analysis.immediate_actions?.[0];
+
+                    return (
+                      <div key={photo.id || idx} className="album-item">
+                        <img
+                          src={getSiteImageUrl(photo.site_id, photo.filename)}
+                          alt={photo.caption}
+                          className="album-item-thumb"
+                        />
+                        <div className="album-item-content">
+                          <div className="album-item-header">
+                            <div>
+                              <span className="album-sender">{photo.sender}</span>
+                              <span className="album-time">
+                                {" "}
+                                • {new Date(photo.timestamp).toLocaleString()}
+                              </span>
+                            </div>
+                            <span className={`status-badge ${risk}`}>
+                              {risk === "critical"
+                                ? "🚨 CRITICAL RISK"
+                                : risk === "high"
+                                  ? "⚠️ HIGH RISK"
+                                  : risk === "medium"
+                                    ? "🟡 MEDIUM RISK"
+                                    : "🟢 LOW RISK"}
+                            </span>
+                          </div>
+
+                          <p className="album-caption">"{photo.caption}"</p>
+
+                          {/* Full detailed unabridged points in Album View */}
+                          <div className="plain-risk-box">
+                            <div className="plain-risk-row">
+                              <span className="plain-risk-label">⚠️ What is the risk:</span>
+                              <span className="plain-risk-desc">{whatRisk}</span>
+                            </div>
+                            <div className="plain-risk-row">
+                              <span className="plain-risk-label">✅ How to improve:</span>
+                              <span className="plain-improve-desc">{howToImprove}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )
           ) : (
-            <div className="album-feed">
-              {sitePhotos
-                .slice()
-                .reverse()
-                .map((photo, idx) => {
-                  const analysis = photo.safety_analysis || {};
-                  const risk = analysis.overall_risk_level || "low";
-                  const whatRisk =
-                    analysis.what_is_the_risk ||
-                    analysis.hazards?.[0]?.description ||
-                    analysis.summary;
-                  const howToImprove =
-                    analysis.how_to_improve ||
-                    analysis.hazards?.[0]?.recommendation ||
-                    analysis.immediate_actions?.[0];
+            /* Crack Inspections Tab */
+            loadingCracks ? (
+              <div style={{ textAlign: "center", padding: "40px" }}>
+                <Spinner /> Loading structural crack inspection records...
+              </div>
+            ) : siteCracks.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "40px",
+                  background: "#ffffff",
+                  borderRadius: "10px",
+                  border: "1px solid #e5ebe6",
+                }}
+              >
+                <div style={{ fontSize: "28px", marginBottom: "8px" }}>🔍</div>
+                <p style={{ margin: "0 0 12px", color: "#738078" }}>
+                  No structural cracks logged for this site yet.
+                </p>
+                <button
+                  className="btn-primary"
+                  onClick={() => setIsCrackUploadOpen(true)}
+                >
+                  Inspect & Log New Crack
+                </button>
+              </div>
+            ) : (
+              <div className="album-feed">
+                {siteCracks.map((crack, idx) => {
+                  const diag = crack.crack_analysis || {};
+                  const sev = (diag.overall_severity || "none").toLowerCase();
+                  const detected = diag.crack_detected;
+                  const sevClass =
+                    sev === "critical" || sev === "severe"
+                      ? "critical"
+                      : sev === "moderate"
+                        ? "high"
+                        : sev === "minor"
+                          ? "medium"
+                          : "low";
 
                   return (
-                    <div key={photo.id || idx} className="album-item">
+                    <div key={crack.id || idx} className="album-item">
                       <img
-                        src={getSiteImageUrl(photo.site_id, photo.filename)}
-                        alt={photo.caption}
+                        src={getSiteImageUrl(crack.site_id, crack.filename)}
+                        alt={crack.caption}
                         className="album-item-thumb"
                       />
                       <div className="album-item-content">
                         <div className="album-item-header">
                           <div>
-                            <span className="album-sender">{photo.sender}</span>
+                            <span className="album-sender">{crack.sender}</span>
                             <span className="album-time">
                               {" "}
-                              • {new Date(photo.timestamp).toLocaleString()}
+                              • {new Date(crack.timestamp).toLocaleString()}
                             </span>
                           </div>
-                          <span className={`status-badge ${risk}`}>
-                            {risk.toUpperCase()} RISK
+                          <span className={`status-badge ${sevClass}`}>
+                            {detected ? `${sev.toUpperCase()} CRACK` : "NO CRACKS"}
                           </span>
                         </div>
 
-                        <p className="album-caption">"{photo.caption}"</p>
+                        <p className="album-caption">"{crack.caption}"</p>
 
                         <div className="plain-risk-box">
                           <div className="plain-risk-row">
-                            <span className="plain-risk-label">⚠️ What is the risk:</span>
-                            <span className="plain-risk-desc">{whatRisk}</span>
+                            <span className="plain-risk-label">🏗️ Structural Risk:</span>
+                            <span className="plain-risk-desc">
+                              {(diag.structural_risk || "none").toUpperCase()}
+                            </span>
                           </div>
                           <div className="plain-risk-row">
-                            <span className="plain-risk-label">✅ How to improve:</span>
-                            <span className="plain-improve-desc">{howToImprove}</span>
+                            <span className="plain-risk-label">📝 Diagnosis:</span>
+                            <span className="plain-risk-desc">{diag.summary}</span>
                           </div>
+                          {diag.cracks?.[0]?.recommended_action && (
+                            <div className="plain-risk-row">
+                              <span className="plain-risk-label">✅ Civil Fix:</span>
+                              <span className="plain-improve-desc">
+                                {diag.cracks[0].recommended_action}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
                   );
                 })}
-            </div>
+              </div>
+            )
           )}
         </div>
       )}
@@ -1332,6 +1524,75 @@ export default function SafetyMonitoring({ backendStatus: _backendStatus }) {
                   </button>
                   <button type="submit" className="btn-primary" style={{ minWidth: "130px" }}>
                     🔓 Unlock Access
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+         MODAL 7: UPLOAD CRACK PHOTO FOR CURRENT SITE
+         ══════════════════════════════════════════════════════════════════════ */}
+      {isCrackUploadOpen && (
+        <div className="modal-backdrop" onClick={() => setIsCrackUploadOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "520px" }}>
+            <div className="modal-header">
+              <h3>🔍 Log Structural Crack: {activeSite?.name || "Current Site"}</h3>
+              <button
+                className="modal-close-btn"
+                onClick={() => {
+                  setIsCrackUploadOpen(false);
+                  setCrackUploadFile(null);
+                  setCrackUploadCaption("");
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleDirectCrackUpload} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <p style={{ margin: "0", fontSize: "12px", color: "#738078" }}>
+                  Upload a photo of a crack, structural fissure, spalling, or foundation shift. Antigravity AI will inspect crack width, geometry, structural hazard, and suggest civil repair methods.
+                </p>
+
+                <div className="form-group">
+                  <label>Crack / Structural Defect Photo *</label>
+                  <ImageUploader
+                    file={crackUploadFile}
+                    onChange={(f) => setCrackUploadFile(f)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Structural Location / Member Notes</label>
+                  <input
+                    type="text"
+                    value={crackUploadCaption}
+                    onChange={(e) => setCrackUploadCaption(e.target.value)}
+                    placeholder="e.g. Beam B-12 shear diagonal crack, 2nd floor east wing"
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button
+                    type="button"
+                    className="btn-card-action"
+                    onClick={() => {
+                      setIsCrackUploadOpen(false);
+                      setCrackUploadFile(null);
+                      setCrackUploadCaption("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={crackUploading || !crackUploadFile}
+                  >
+                    {crackUploading ? <><Spinner /> Analyzing Crack...</> : "Inspect & Save to Site"}
                   </button>
                 </div>
               </form>

@@ -81,6 +81,8 @@ def initialize_clean_sites(count: int = 5) -> list[dict[str, Any]]:
             "overall_risk": "none",
             "ppe_compliance": "pending",
             "photo_count": 0,
+            "crack_count": 0,
+            "latest_crack_severity": "none",
             "latest_photo": None,
         }
         # Only reset photo file if it doesn't already exist
@@ -201,6 +203,8 @@ def create_or_setup_sites(count: int, site_names: list[str] | None = None) -> li
             "overall_risk": "none",
             "ppe_compliance": "pending",
             "photo_count": 0,
+            "crack_count": 0,
+            "latest_crack_severity": "none",
             "latest_photo": None,
         }
         sites.append(site_record)
@@ -275,6 +279,12 @@ def delete_site(site_id: str) -> bool:
                 rf.unlink()
             except Exception as e:
                 logger.warning("Could not delete reports file %s: %s", rf, e)
+        cf = get_site_cracks_file(site_id)
+        if cf.exists():
+            try:
+                cf.unlink()
+            except Exception as e:
+                logger.warning("Could not delete cracks file %s: %s", cf, e)
         return True
     return False
 
@@ -392,3 +402,85 @@ def get_all_site_reports(site_id: str | None = None) -> list[dict[str, Any]]:
         all_reports.extend(_read_site_reports(s["id"]))
     all_reports.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return all_reports
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PER-SITE STRUCTURAL CRACK DETECTION STORAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_site_cracks_file(site_id: str) -> Path:
+    return DATA_DIR / f"cracks_{site_id}.json"
+
+
+def _read_site_cracks(site_id: str) -> list[dict[str, Any]]:
+    path = get_site_cracks_file(site_id)
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error("Failed to read cracks for %s: %s", site_id, e)
+        return []
+
+
+def _write_site_cracks(site_id: str, cracks: list[dict[str, Any]]) -> None:
+    path = get_site_cracks_file(site_id)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cracks, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error("Failed to write cracks for %s: %s", site_id, e)
+
+
+def add_site_crack(
+    site_id: str,
+    file_bytes: bytes,
+    filename: str,
+    sender: str,
+    caption: str,
+    crack_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Stores an inspection photo and structural crack diagnosis under this site."""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in [".jpg", ".jpeg", ".png", ".webp"]:
+        suffix = ".jpg"
+    safe_name = f"{site_id}_crack_{uuid.uuid4().hex[:8]}{suffix}"
+    out_path = UPLOADS_DIR / safe_name
+    out_path.write_bytes(file_bytes)
+
+    cracks = _read_site_cracks(site_id)
+    severity = crack_analysis.get("overall_severity", "none")
+    record = {
+        "id": f"crack-{uuid.uuid4().hex[:8]}",
+        "site_id": site_id,
+        "filename": safe_name,
+        "sender": sender or "Field Inspector",
+        "caption": caption or "Structural crack inspection",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "crack_analysis": crack_analysis,
+    }
+    cracks.insert(0, record)
+    _write_site_cracks(site_id, cracks)
+
+    # Update site metrics
+    db = _read_sites_db()
+    for s in db.get("sites", []):
+        if s["id"] == site_id:
+            s["crack_count"] = len(cracks)
+            s["latest_crack_severity"] = severity
+            break
+    _write_sites_db(db)
+    logger.info("Saved crack analysis for %s (severity=%s)", site_id, severity)
+    return record
+
+
+def get_all_site_cracks(site_id: str | None = None) -> list[dict[str, Any]]:
+    """Retrieves all site cracks or crack records for a specific site."""
+    if site_id:
+        return _read_site_cracks(site_id)
+    all_cracks = []
+    for s in get_all_sites():
+        all_cracks.extend(_read_site_cracks(s["id"]))
+    all_cracks.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return all_cracks
